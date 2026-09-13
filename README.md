@@ -1,6 +1,7 @@
 # Aeternum PremiApp Bot 🌟
 > **Automated Digital Product & Premium Store Telegram Bot**  
-> Powered by Python (`aiogram 3.x`), PostgreSQL, and Dynamic QRIS Payment Gateways.
+> Powered by Python (`aiogram 3.x`), PostgreSQL, and Dynamic QRIS Payment Gateways.  
+> Official Owner & Admin: **@dasrams**
 
 ---
 
@@ -45,6 +46,20 @@
 
 ---
 
+## ⚡ Instalasi Cepat di VPS Baru
+
+Cukup clone repositori dan jalankan installer otomatis:
+
+```bash
+git clone https://gitlab.com/RamsNotes31/aeternum-premiapp-bot.git
+cd aeternum-premiapp-bot
+sudo bash scripts/install.sh
+```
+
+Panduan instalasi manual dan Docker selengkapnya dapat dibaca di **[INSTALL.md](./INSTALL.md)**.
+
+---
+
 ## 📁 Struktur Proyek
 ```text
 aeternum-premiapp-bot/
@@ -59,7 +74,7 @@ aeternum-premiapp-bot/
 │   │   ├── wallet.py      # Top up deposit QRIS & bayar pakai saldo
 │   │   └── warranty.py    # Tiket garansi & resolusi kendala akun
 │   ├── keyboards/         # Inline keyboard builder (User & Admin UI)
-│   ├── middlewares/       # Anti-spam rate limiter & database session
+│   ├── middlewares/       # Anti-spam rate limiter, global error handler & DB session
 │   └── services/          # Fulfillment engine, subscription reminders & cleaner
 ├── database/
 │   ├── connection.py      # Async PostgreSQL engine (SQLAlchemy + asyncpg)
@@ -67,7 +82,13 @@ aeternum-premiapp-bot/
 │   ├── models.py          # Definisi ORM tabel
 │   └── schema.sql         # Skema DDL PostgreSQL
 ├── scripts/
+│   ├── install.sh         # Installer otomatis satu-klik untuk VPS
+│   ├── install_docker.sh  # Installer Docker satu-klik
 │   └── backup_db.sh       # Script backup otomatis PostgreSQL + rotasi 7 hari
+├── tests/
+│   └── test_suite.py      # 14-Scenario Automated Test Suite
+├── nginx/
+│   └── aeternum.conf      # Nginx production reverse proxy & rate limiter
 ├── webhook/
 │   ├── server.py          # FastAPI listener callback pembayaran (IP & signature verified)
 │   └── gateway.py         # Integrasi API Payment Gateway QRIS
@@ -76,12 +97,14 @@ aeternum-premiapp-bot/
 ├── docker-compose.yml     # Orkestrasi Bot + PostgreSQL
 ├── requirements.txt       # Daftar dependensi Python
 ├── SECURITY.md            # Panduan keamanan & hardening production
+├── INSTALL.md             # Panduan instalasi VPS baru
 ├── PRD.md                 # Product Requirement Document Lengkap
 └── README.md
 ```
 
 ---
 
-## 📄 Dokumentasi PRD & Security
-- Spesifikasi lengkap: [PRD.md](./PRD.md)
-- Panduan keamanan: [SECURITY.md](./SECURITY.md)
+## 📄 Dokumentasi Tambahan
+- Panduan Instalasi VPS: [INSTALL.md](./INSTALL.md)
+- Panduan Keamanan & Hardening: [SECURITY.md](./SECURITY.md)
+- Spesifikasi Produk Lengkap: [PRD.md](./PRD.md)
