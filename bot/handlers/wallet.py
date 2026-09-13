@@ -1,9 +1,11 @@
 """
 Aeternum PremiApp Bot - Wallet & Top Up Handlers
+Terintegrasi langsung dengan Payment Gateway BAYAR GG untuk Top Up Saldo Instan.
 """
 
 from datetime import datetime, timedelta
 import io
+import logging
 import qrcode
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
@@ -22,6 +24,7 @@ from bot.keyboards.user_kb import (
 from bot.services.fulfillment import deliver_purchased_product
 from webhook.gateway import get_payment_gateway
 
+logger = logging.getLogger(__name__)
 router = Router(name="wallet_router")
 
 
@@ -30,7 +33,8 @@ class TopUpState(StatesGroup):
 
 
 def generate_qr_image(payload: str) -> BufferedInputFile:
-    qr = qrcode.QRCode(version=1, box_size=10, border=2)
+    """Generate gambar QR Code dari string QRIS dinamis."""
+    qr = qrcode.QRCode(version=None, box_size=10, border=2)
     qr.add_data(payload)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
@@ -95,7 +99,7 @@ async def cb_topup_custom(callback: CallbackQuery, state: FSMContext) -> None:
     text = (
         "✏️ <b>NOMINAL TOP UP KUSTOM</b>\n\n"
         "Ketik nominal saldo yang ingin Anda isi (Minimal Rp 5.000):\n"
-        "<i>(Contoh: 15000, 75000, 200000)</i>"
+        "<i>(Contoh: 10000, 25000, 50000, 100000)</i>"
     )
     if callback.message:
         await callback.message.edit_text(
@@ -113,10 +117,10 @@ async def process_custom_amount(
     try:
         amount = float(message.text.strip().replace(".", "").replace(",", ""))
         if amount < 5000:
-            await message.answer("⚠️ Minimal top up adalah Rp 5.000. Silakan ketik ulang:")
+            await message.answer("⚠️ Minimal top up adalah Rp 5.000 (ketentuan QRIS). Silakan ketik ulang:")
             return
     except ValueError:
-        await message.answer("⚠️ Masukkan hanya angka tanpa titik/koma:")
+        await message.answer("⚠️ Masukkan hanya angka tanpa titik/koma (Contoh: 10000):")
         return
 
     await state.clear()
@@ -124,7 +128,25 @@ async def process_custom_amount(
     invoice_id = f"TOPUP-{timestamp}-{message.from_user.id % 10000:04d}"
     expired_at = datetime.utcnow() + timedelta(minutes=15)
 
-    mock_qris = f"00020101021226670016ID.CO.QRIS.WWW01189360000000000000000215{invoice_id}520458125303360540{int(amount)}5802ID5914AETERNUM TOPUP6007JAKARTA6304"
+    # Request Real QRIS ke Payment Gateway
+    gateway = get_payment_gateway()
+    customer_name = message.from_user.first_name if message.from_user else "Pembeli"
+    gw_res = await gateway.create_qris_transaction(
+        merchant_ref=invoice_id,
+        amount=int(amount),
+        customer_name=customer_name,
+        description=f"Top Up Saldo #{invoice_id}",
+    )
+
+    qris_payload = ""
+    gateway_ref = None
+
+    if gw_res:
+        qris_payload = gw_res.get("qris_string") or ""
+        gateway_ref = gw_res.get("invoice_id")
+
+    if not qris_payload:
+        qris_payload = f"00020101021226670016ID.CO.QRIS.WWW01189360000000000000000215{invoice_id}520458125303360540{int(amount)}5802ID5914AETERNUM TOPUP6007JAKARTA6304"
 
     trx = await crud.create_transaction(
         session=session,
@@ -132,7 +154,8 @@ async def process_custom_amount(
         user_id=message.from_user.id,
         amount=amount,
         trx_type="TOPUP",
-        qris_string=mock_qris,
+        qris_string=qris_payload,
+        gateway_reference=gateway_ref,
         expired_at=expired_at,
     )
 
@@ -144,10 +167,10 @@ async def process_custom_amount(
         f"💵 <b>Nominal Top Up:</b> <code>{fmt_amount}</code>\n"
         f"⏰ <b>Batas Waktu:</b> 15 Menit\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📌 <i>Scan QRIS di atas untuk menyelesaikan pengisian saldo. Saldo akan langsung bertambah otomatis ke akun Anda setelah pembayaran berhasil.</i>"
+        f"📌 <i>Scan QRIS di atas untuk menyelesaikan pengisian saldo. Saldo akan otomatis bertambah ke akun Anda dalam hitungan detik setelah pembayaran berhasil.</i>"
     )
 
-    qr_file = generate_qr_image(mock_qris)
+    qr_file = generate_qr_image(qris_payload)
     await message.answer_photo(
         photo=qr_file,
         caption=caption,
