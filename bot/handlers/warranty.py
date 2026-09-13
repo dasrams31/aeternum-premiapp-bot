@@ -112,8 +112,8 @@ async def process_warranty_final(
         f"✅ <b>TIKET KLAIM GARANSI BERHASIL DIBUAT!</b>\n\n"
         f"🆔 <b>Nomor Tiket:</b> <code>{ticket_code}</code>\n"
         f"📦 <b>Produk:</b> {prod_name}\n"
-        f"⏳ <b>Status:</b> <b>DALAM ANTRIAN PENGECEKAN ADMIN</b>\n\n"
-        f"Admin kami akan segera mengecek klaim Anda. Notifikasi tindak lanjut akan dikirim langsung ke chat ini.",
+        f"⏳ <b>Status:</b> <b>DALAM PENGECEKAN ADMIN UTAMA (@dasrams)</b>\n\n"
+        f"Admin kami akan segera memeriksa klaim Anda. Notifikasi akun pengganti atau penyelesaian akan dikirimkan langsung ke chat ini.",
         reply_markup=back_to_main_kb(),
         parse_mode="HTML",
     )

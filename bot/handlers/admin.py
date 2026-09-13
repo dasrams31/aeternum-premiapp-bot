@@ -87,10 +87,12 @@ async def show_admin_dashboard(
 
     await state.clear()
     text = (
-        f"⚙️ <b>PANEL ADMIN - Aeternum PremiApp Bot</b>\n"
+        f"⚙️ <b>PANEL ADMIN UTAMA — Aeternum PremiApp Bot</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Selamat datang di pusat manajemen toko digital Anda.\n"
-        f"Silakan pilih menu manajemen di bawah ini:"
+        f"👑 <b>Admin Terotorisasi:</b> @dasrams (ID: <code>{user.id}</code>)\n"
+        f"🛡️ <b>Status Keamanan:</b> Enkripsi AES-256 Aktif | Stealth Mode ON\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Silakan pilih menu kontrol toko di bawah ini:"
     )
 
     if isinstance(event, CallbackQuery) and event.message:
