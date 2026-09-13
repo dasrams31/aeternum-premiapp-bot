@@ -412,6 +412,130 @@ async def add_stock_items_bulk(
     return len(items)
 
 
+async def get_available_stock_items(
+    session: AsyncSession, product_id: int, limit: int = 50
+) -> List[Tuple[int, str]]:
+    """Mengambil daftar ID dan isi teks (terdekripsi) dari stok yang belum terjual."""
+    now = datetime.utcnow()
+    stmt = (
+        select(ProductItem)
+        .where(ProductItem.product_id == product_id)
+        .where(ProductItem.is_sold.is_(False))
+        .where(
+            or_(
+                ProductItem.reserved_until.is_(None),
+                ProductItem.reserved_until < now,
+            )
+        )
+        .order_by(ProductItem.id.asc())
+        .limit(limit)
+    )
+    res = await session.execute(stmt)
+    items = res.scalars().all()
+    result = []
+    for it in items:
+        try:
+            decrypted = decrypt_text(it.content)
+        except Exception:
+            decrypted = it.content
+        result.append((it.id, decrypted))
+    return result
+
+
+async def pull_stock_items(
+    session: AsyncSession, product_id: int, count: int = 1
+) -> List[str]:
+    """Mengambil dan mengeluarkan stok untuk admin (otomatis ditandai terjual manual oleh admin)."""
+    now = datetime.utcnow()
+    stmt = (
+        select(ProductItem)
+        .where(ProductItem.product_id == product_id)
+        .where(ProductItem.is_sold.is_(False))
+        .where(
+            or_(
+                ProductItem.reserved_until.is_(None),
+                ProductItem.reserved_until < now,
+            )
+        )
+        .order_by(ProductItem.id.asc())
+        .limit(count)
+    )
+    res = await session.execute(stmt)
+    items = list(res.scalars().all())
+    if not items:
+        return []
+
+    pulled_contents = []
+    ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    for it in items:
+        try:
+            decrypted = decrypt_text(it.content)
+        except Exception:
+            decrypted = it.content
+        pulled_contents.append(decrypted)
+        it.is_sold = True
+        it.sold_at = now
+        it.transaction_id = f"ADM-PULL-{ts}"
+
+    await session.commit()
+    return pulled_contents
+
+
+async def reduce_stock_items(
+    session: AsyncSession, product_id: int, count: int = 1
+) -> int:
+    """Menghapus permanen sejumlah item stok yang belum terjual (mengurangi kuantitas)."""
+    now = datetime.utcnow()
+    stmt = (
+        select(ProductItem)
+        .where(ProductItem.product_id == product_id)
+        .where(ProductItem.is_sold.is_(False))
+        .where(
+            or_(
+                ProductItem.reserved_until.is_(None),
+                ProductItem.reserved_until < now,
+            )
+        )
+        .order_by(ProductItem.id.desc())
+        .limit(count)
+    )
+    res = await session.execute(stmt)
+    items = list(res.scalars().all())
+    if not items:
+        return 0
+
+    for it in items:
+        await session.delete(it)
+
+    await session.commit()
+    return len(items)
+
+
+async def clear_all_stock_items(
+    session: AsyncSession, product_id: int
+) -> int:
+    """Menghapus seluruh stok yang belum terjual untuk produk tertentu."""
+    now = datetime.utcnow()
+    stmt = (
+        select(ProductItem)
+        .where(ProductItem.product_id == product_id)
+        .where(ProductItem.is_sold.is_(False))
+        .where(
+            or_(
+                ProductItem.reserved_until.is_(None),
+                ProductItem.reserved_until < now,
+            )
+        )
+    )
+    res = await session.execute(stmt)
+    items = list(res.scalars().all())
+    for it in items:
+        await session.delete(it)
+
+    await session.commit()
+    return len(items)
+
+
 async def reserve_stock_item_atomic(
     session: AsyncSession, product_id: int, transaction_id: str, duration_minutes: int = 15
 ) -> Optional[ProductItem]:

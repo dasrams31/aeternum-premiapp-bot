@@ -30,6 +30,8 @@ from bot.keyboards.admin_kb import (
     confirm_delete_product_kb,
     product_management_detail_kb,
     product_warranty_action_kb,
+    pull_stock_kb,
+    reduce_stock_kb,
     select_category_kb,
     select_discount_type_kb,
     select_duration_kb,
@@ -103,6 +105,11 @@ class AddStockState(StatesGroup):
     waiting_for_items_text = State()
     waiting_for_warranty_action = State()
     waiting_for_custom_note = State()
+
+
+class AdminStockControlState(StatesGroup):
+    waiting_for_pull_custom = State()
+    waiting_for_reduce_custom = State()
 
 
 class AdminWarrantyState(StatesGroup):
@@ -952,6 +959,291 @@ async def process_stock_paste(
         reply_markup=stock_success_kb.as_markup(),
         parse_mode="HTML",
     )
+
+
+# ==========================================
+# 3.0 LIHAT, TARIK & KURANGI STOK (ADMIN)
+# ==========================================
+@router.callback_query(F.data.startswith("adm_view_stock_"))
+async def cb_view_product_stock_contents(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    if not callback.data:
+        return
+    product_id = int(callback.data.replace("adm_view_stock_", ""))
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+    if not product:
+        await callback.answer("Produk tidak ditemukan!", show_alert=True)
+        return
+
+    items = await crud.get_available_stock_items(session=session, product_id=product_id, limit=30)
+    total_stock = await crud.count_available_stock(session=session, product_id=product_id)
+
+    if not items:
+        text = (
+            f"📦 <b>STOK PRODUK: {product.name.upper()}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔴 <b>Status:</b> Stok Kosong (0 Item)\n\n"
+            f"<i>Belum ada stok yang tersedia saat ini. Silakan tambahkan stok menggunakan tombol 'Tambah Stok'.</i>"
+        )
+    else:
+        lines = []
+        for idx, (it_id, content) in enumerate(items, 1):
+            lines.append(f"{idx}. {content}")
+        items_str = "\n".join(lines)
+        more_str = f"\n<i>...dan {total_stock - len(items)} item lainnya</i>" if total_stock > len(items) else ""
+
+        text = (
+            f"📦 <b>ISI STOK PRODUK: {product.name.upper()}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🟢 <b>Total Stok Tersedia:</b> <code>{total_stock} Item</code>\n\n"
+            f"<b>Daftar Kredensial / Akun Siap Jual:</b>\n"
+            f"<code>{items_str}</code>{more_str}\n\n"
+            f"<i>💡 Ketuk teks di atas untuk menyalin. Anda juga bisa menarik atau mengurangi stok via menu di bawah.</i>"
+        )
+
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=product_management_detail_kb(product_id=product.id),
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_pull_stock_"))
+async def cb_prompt_pull_stock(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    if not callback.data:
+        return
+    product_id = int(callback.data.replace("adm_pull_stock_", ""))
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+    if not product:
+        await callback.answer("Produk tidak ditemukan!", show_alert=True)
+        return
+
+    total_stock = await crud.count_available_stock(session=session, product_id=product_id)
+    text = (
+        f"📥 <b>TARIK / AMBIL STOK: {product.name.upper()}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🟢 <b>Sisa Stok Tersedia:</b> <code>{total_stock} Item</code>\n\n"
+        f"Fitur ini akan mengeluarkan stok dari toko (ditandai terambil oleh Admin) "
+        f"dan mengirimkan kredensialnya langsung ke chat ini untuk keperluan pribadi / manual.\n\n"
+        f"Silakan pilih jumlah yang ingin diambil:"
+    )
+
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=pull_stock_kb(product_id=product.id),
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_do_pull_"))
+async def cb_execute_pull_stock(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    if not callback.data:
+        return
+    parts = callback.data.split("_")
+    # adm_do_pull_{product_id}_{count_or_custom}
+    product_id = int(parts[3])
+    action = parts[4]
+
+    if action == "custom":
+        await state.update_data(pull_product_id=product_id)
+        await state.set_state(AdminStockControlState.waiting_for_pull_custom)
+        text = (
+            "✍️ <b>INPUT JUMLAH STOK YANG INGIN DIAMBIL</b>\n\n"
+            "Ketik berapa jumlah akun/stok yang ingin Anda tarik (angka bulat):\n"
+            "<i>(Contoh: <code>2</code> atau <code>10</code>)</i>"
+        )
+        if isinstance(callback.message, Message):
+            await callback.message.edit_text(
+                text=text,
+                reply_markup=cancel_admin_action_kb(),
+                parse_mode="HTML",
+            )
+        await callback.answer()
+        return
+
+    count = int(action)
+    pulled = await crud.pull_stock_items(session=session, product_id=product_id, count=count)
+    if not pulled:
+        await callback.answer("⚠️ Stok tidak mencukupi atau sudah habis!", show_alert=True)
+        return
+
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+    new_total = await crud.count_available_stock(session=session, product_id=product_id)
+    pulled_str = "\n".join(pulled)
+
+    text = (
+        f"🎉 <b>BERHASIL MENARIK {len(pulled)} STOK!</b>\n\n"
+        f"📦 <b>Produk:</b> {product.name if product else '-'}\n"
+        f"🟢 <b>Sisa Stok Toko Sekarang:</b> <code>{new_total} item</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔑 <b>DETAIL AKUN / KREDENSIAL YANG DIAMBIL:</b>\n\n"
+        f"<code>{pulled_str}</code>\n\n"
+        f"<i>💡 Stok ini sudah otomatis dikeluarkan dari katalog pembeli.</i>"
+    )
+
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=product_management_detail_kb(product_id=product_id),
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.message(AdminStockControlState.waiting_for_pull_custom)
+async def process_custom_pull_stock(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    data = await state.get_data()
+    product_id = data["pull_product_id"]
+    await state.clear()
+
+    try:
+        count = int((message.text or "1").strip())
+        if count <= 0:
+            count = 1
+    except ValueError:
+        count = 1
+
+    pulled = await crud.pull_stock_items(session=session, product_id=product_id, count=count)
+    if not pulled:
+        await message.answer("⚠️ Stok tidak mencukupi atau sudah kosong!", reply_markup=product_management_detail_kb(product_id))
+        return
+
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+    new_total = await crud.count_available_stock(session=session, product_id=product_id)
+    pulled_str = "\n".join(pulled)
+
+    text = (
+        f"🎉 <b>BERHASIL MENARIK {len(pulled)} STOK!</b>\n\n"
+        f"📦 <b>Produk:</b> {product.name if product else '-'}\n"
+        f"🟢 <b>Sisa Stok Toko Sekarang:</b> <code>{new_total} item</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔑 <b>DETAIL AKUN / KREDENSIAL YANG DIAMBIL:</b>\n\n"
+        f"<code>{pulled_str}</code>\n\n"
+        f"<i>💡 Stok ini sudah otomatis dikeluarkan dari katalog pembeli.</i>"
+    )
+    await message.answer(text=text, reply_markup=product_management_detail_kb(product_id=product_id), parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("adm_reduce_stock_"))
+async def cb_prompt_reduce_stock(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    if not callback.data:
+        return
+    product_id = int(callback.data.replace("adm_reduce_stock_", ""))
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+    if not product:
+        await callback.answer("Produk tidak ditemukan!", show_alert=True)
+        return
+
+    total_stock = await crud.count_available_stock(session=session, product_id=product_id)
+    text = (
+        f"📤 <b>KURANGI / HAPUS STOK: {product.name.upper()}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🟢 <b>Sisa Stok Tersedia:</b> <code>{total_stock} Item</code>\n\n"
+        f"Pilih jumlah item yang ingin dihapus permanen dari database stok produk ini:"
+    )
+
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=reduce_stock_kb(product_id=product.id),
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_do_red_"))
+async def cb_execute_reduce_stock(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    if not callback.data:
+        return
+    parts = callback.data.split("_")
+    # adm_do_red_{product_id}_{action}
+    product_id = int(parts[3])
+    action = parts[4]
+
+    if action == "custom":
+        await state.update_data(red_product_id=product_id)
+        await state.set_state(AdminStockControlState.waiting_for_reduce_custom)
+        text = (
+            "✍️ <b>INPUT JUMLAH STOK YANG INGIN DIKURANGI</b>\n\n"
+            "Ketik berapa jumlah stok yang ingin Anda hapus (angka bulat):\n"
+            "<i>(Contoh: <code>3</code> atau <code>15</code>)</i>"
+        )
+        if isinstance(callback.message, Message):
+            await callback.message.edit_text(
+                text=text,
+                reply_markup=cancel_admin_action_kb(),
+                parse_mode="HTML",
+            )
+        await callback.answer()
+        return
+
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+
+    if action == "all":
+        deleted = await crud.clear_all_stock_items(session=session, product_id=product_id)
+        await callback.answer(f"🔥 Berhasil mengosongkan seluruh stok ({deleted} item dihapus)!", show_alert=True)
+    else:
+        count = int(action)
+        deleted = await crud.reduce_stock_items(session=session, product_id=product_id, count=count)
+        await callback.answer(f"✅ Berhasil mengurangi {deleted} item stok!", show_alert=True)
+
+    new_total = await crud.count_available_stock(session=session, product_id=product_id)
+    text = (
+        f"✅ <b>PENGURANGAN STOK BERHASIL!</b>\n\n"
+        f"📦 <b>Produk:</b> {product.name if product else '-'}\n"
+        f"🟢 <b>Sisa Stok Sekarang:</b> <code>{new_total} item</code>\n\n"
+        f"<i>Katalog pembeli telah otomatis diperbarui.</i>"
+    )
+
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=product_management_detail_kb(product_id=product_id),
+            parse_mode="HTML",
+        )
+
+
+@router.message(AdminStockControlState.waiting_for_reduce_custom)
+async def process_custom_reduce_stock(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    data = await state.get_data()
+    product_id = data["red_product_id"]
+    await state.clear()
+
+    try:
+        count = int((message.text or "1").strip())
+        if count <= 0:
+            count = 1
+    except ValueError:
+        count = 1
+
+    deleted = await crud.reduce_stock_items(session=session, product_id=product_id, count=count)
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+    new_total = await crud.count_available_stock(session=session, product_id=product_id)
+
+    text = (
+        f"✅ <b>PENGURANGAN STOK BERHASIL!</b>\n\n"
+        f"📦 <b>Produk:</b> {product.name if product else '-'}\n"
+        f"➖ <b>Jumlah Dihapus:</b> <code>-{deleted} item</code>\n"
+        f"🟢 <b>Sisa Stok Sekarang:</b> <code>{new_total} item</code>"
+    )
+    await message.answer(text=text, reply_markup=product_management_detail_kb(product_id=product_id), parse_mode="HTML")
 
 
 # ==========================================

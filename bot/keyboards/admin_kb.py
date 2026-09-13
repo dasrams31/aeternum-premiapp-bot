@@ -183,16 +183,54 @@ def select_product_to_manage_kb(products: list[Product]) -> InlineKeyboardMarkup
 def product_management_detail_kb(product_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
+        InlineKeyboardButton(text="👁️ Cek Isi Stok", callback_data=f"adm_view_stock_{product_id}"),
+        InlineKeyboardButton(text="➕ Tambah Stok", callback_data=f"adm_stock_{product_id}"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="📥 Ambil / Tarik Stok", callback_data=f"adm_pull_stock_{product_id}"),
+        InlineKeyboardButton(text="📤 Kurangi / Hapus Stok", callback_data=f"adm_reduce_stock_{product_id}"),
+    )
+    builder.row(
         InlineKeyboardButton(text="⏱️ Ubah Masa Aktif", callback_data=f"adm_edit_dur_{product_id}"),
         InlineKeyboardButton(text="🛡️ Kelola Garansi", callback_data=f"adm_war_prod_{product_id}"),
     )
     builder.row(
-        InlineKeyboardButton(text="📦 Tambah Stok", callback_data=f"adm_stock_{product_id}"),
         InlineKeyboardButton(text="🗑️ Hapus Produk", callback_data=f"adm_del_prod_{product_id}"),
     )
     builder.row(
         InlineKeyboardButton(text="🔙 Kembali ke Daftar Produk", callback_data="admin_manage_products"),
         InlineKeyboardButton(text="🏠 Panel Admin", callback_data="admin_dashboard"),
+    )
+    return builder.as_markup()
+
+
+def pull_stock_kb(product_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="📥 Ambil 1 Akun", callback_data=f"adm_do_pull_{product_id}_1"),
+        InlineKeyboardButton(text="📥 Ambil 5 Akun", callback_data=f"adm_do_pull_{product_id}_5"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="✍️ Ketik Jumlah Ambil", callback_data=f"adm_do_pull_{product_id}_custom"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Kembali ke Produk", callback_data=f"adm_prod_view_{product_id}"),
+    )
+    return builder.as_markup()
+
+
+def reduce_stock_kb(product_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="➖ Kurangi 1 Stok", callback_data=f"adm_do_red_{product_id}_1"),
+        InlineKeyboardButton(text="➖ Kurangi 5 Stok", callback_data=f"adm_do_red_{product_id}_5"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="✍️ Ketik Jumlah Kurangi", callback_data=f"adm_do_red_{product_id}_custom"),
+        InlineKeyboardButton(text="🔥 Kosongkan Semua Stok", callback_data=f"adm_do_red_{product_id}_all"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Kembali ke Produk", callback_data=f"adm_prod_view_{product_id}"),
     )
     return builder.as_markup()
 
