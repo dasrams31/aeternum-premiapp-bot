@@ -11,22 +11,23 @@ from database.models import Category, Product
 def admin_main_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
+        InlineKeyboardButton(text="📋 Kelola & Cek Produk", callback_data="admin_manage_products"),
         InlineKeyboardButton(text="➕ Tambah Produk", callback_data="admin_add_product"),
-        InlineKeyboardButton(text="📁 Kelola Kategori", callback_data="admin_manage_categories"),
     )
     builder.row(
         InlineKeyboardButton(text="📦 Tambah Stok Teks", callback_data="admin_add_stock"),
+        InlineKeyboardButton(text="📁 Kelola Kategori", callback_data="admin_manage_categories"),
+    )
+    builder.row(
         InlineKeyboardButton(text="🛡️ Kelola Garansi", callback_data="admin_manage_warranties"),
-    )
-    builder.row(
         InlineKeyboardButton(text="🎟️ Buat Kode Promo", callback_data="admin_add_promo"),
+    )
+    builder.row(
         InlineKeyboardButton(text="📢 Broadcast Pesan", callback_data="admin_broadcast"),
-    )
-    builder.row(
         InlineKeyboardButton(text="📥 Export CSV / Excel", callback_data="admin_export_csv"),
-        InlineKeyboardButton(text="📊 Laporan & Omset", callback_data="admin_reports"),
     )
     builder.row(
+        InlineKeyboardButton(text="📊 Laporan & Omset", callback_data="admin_reports"),
         InlineKeyboardButton(text="🔙 Menu Pembeli", callback_data="back_to_main"),
     )
     return builder.as_markup()
@@ -163,4 +164,69 @@ def product_warranty_action_kb(product_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🔙 Kembali ke Daftar Garansi", callback_data="admin_manage_warranties")
     )
     return builder.as_markup()
+
+
+def select_product_to_manage_kb(products: list[Product]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for prod in products:
+        dur_str = prod.duration_label or (f"{prod.duration_days} Hari" if prod.duration_days else "Lifetime")
+        btn_text = f"📦 {prod.name} | Rp {prod.price:,.0f} ({dur_str})".replace(",", ".")
+        builder.row(
+            InlineKeyboardButton(text=btn_text, callback_data=f"adm_prod_view_{prod.id}")
+        )
+    builder.row(
+        InlineKeyboardButton(text="➕ Tambah Produk Baru", callback_data="admin_add_product"),
+        InlineKeyboardButton(text="🔙 Panel Admin", callback_data="admin_dashboard"),
+    )
+    return builder.as_markup()
+
+
+def product_management_detail_kb(product_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="⏱️ Ubah Masa Aktif", callback_data=f"adm_edit_dur_{product_id}"),
+        InlineKeyboardButton(text="🛡️ Kelola Garansi", callback_data=f"adm_war_prod_{product_id}"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="📦 Tambah Stok", callback_data=f"adm_stock_{product_id}"),
+        InlineKeyboardButton(text="🗑️ Hapus Produk", callback_data=f"adm_del_prod_{product_id}"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Kembali ke Daftar Produk", callback_data="admin_manage_products"),
+        InlineKeyboardButton(text="🏠 Panel Admin", callback_data="admin_dashboard"),
+    )
+    return builder.as_markup()
+
+
+def select_duration_kb(prefix: str = "adm_dur") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🗓️ 1 Bulan", callback_data=f"{prefix}_1M"),
+        InlineKeyboardButton(text="🗓️ 3 Bulan", callback_data=f"{prefix}_3M"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🗓️ 6 Bulan", callback_data=f"{prefix}_6M"),
+        InlineKeyboardButton(text="🗓️ 1 Tahun (12 Bln)", callback_data=f"{prefix}_1Y"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🗓️ 18 Bulan", callback_data=f"{prefix}_18M"),
+        InlineKeyboardButton(text="♾️ Lifetime / Permanen", callback_data=f"{prefix}_LIFETIME"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="✍️ Ketik Bebas / Custom Sendiri", callback_data=f"{prefix}_CUSTOM_TYPING")
+    )
+    builder.row(
+        InlineKeyboardButton(text="❌ Batalkan", callback_data="admin_dashboard")
+    )
+    return builder.as_markup()
+
+
+def confirm_delete_product_kb(product_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="⚠️ Ya, Hapus Produk Ini", callback_data=f"adm_confirm_del_{product_id}"),
+        InlineKeyboardButton(text="❌ Batalkan", callback_data=f"adm_prod_view_{product_id}"),
+    )
+    return builder.as_markup()
+
 

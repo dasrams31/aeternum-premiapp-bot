@@ -130,7 +130,8 @@ async def cb_show_product_detail(
     formatted_price = f"Rp {product.price:,.0f}".replace(",", ".")
     formatted_balance = f"Rp {user_balance:,.0f}".replace(",", ".")
     desc_text = product.description or "Tidak ada deskripsi tambahan."
-    duration_info = f"\n⏱️ <b>Masa Aktif:</b> <code>{product.duration_days} Hari</code>" if product.duration_days else ""
+    dur_str = product.duration_label or (f"{product.duration_days} Hari" if product.duration_days else "Lifetime / Permanen")
+    duration_info = f"\n⏱️ <b>Masa Aktif:</b> <code>{dur_str}</code>"
 
     war_badge = "❌ Tidak Ada Garansi" if product.warranty_type == "NONE" else ("⚡ Garansi 24 Jam" if product.warranty_type == "24_HOURS" else "📝 Garansi Khusus")
     war_info = f"\n🛡️ <b>Garansi:</b> <b>{war_badge}</b>"

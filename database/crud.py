@@ -288,7 +288,8 @@ async def create_product(
     name: str,
     price: float,
     product_type: str,
-    duration_days: int = 30,
+    duration_days: Optional[int] = 30,
+    duration_label: Optional[str] = None,
     description: Optional[str] = None,
     text_content: Optional[str] = None,
     telegram_file_id: Optional[str] = None,
@@ -302,6 +303,7 @@ async def create_product(
         price=price,
         product_type=product_type,
         duration_days=duration_days,
+        duration_label=duration_label,
         description=description,
         text_content=text_content,
         telegram_file_id=telegram_file_id,
@@ -313,6 +315,33 @@ async def create_product(
     await session.commit()
     await session.refresh(product)
     return product
+
+
+async def update_product_duration(
+    session: AsyncSession,
+    product_id: int,
+    duration_days: Optional[int],
+    duration_label: str,
+) -> Optional[Product]:
+    product = await get_product_by_id(session, product_id)
+    if product:
+        product.duration_days = duration_days
+        product.duration_label = duration_label
+        await session.commit()
+        await session.refresh(product)
+    return product
+
+
+async def delete_product(
+    session: AsyncSession,
+    product_id: int,
+) -> bool:
+    product = await get_product_by_id(session, product_id)
+    if product:
+        await session.delete(product)
+        await session.commit()
+        return True
+    return False
 
 
 async def update_product_warranty(

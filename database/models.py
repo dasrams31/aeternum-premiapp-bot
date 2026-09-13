@@ -92,8 +92,9 @@ class Product(Base):
     # Types: 'TEXT_STOCK', 'TEXT_STATIC', 'FILE', 'INVITE_LINK'
     product_type: Mapped[str] = mapped_column(String(50), nullable=False)
     
-    # Durasi langganan dalam hari (misal 30 hari untuk Netflix 1 Bulan)
+    # Durasi langganan dalam hari & label tampilan custom
     duration_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=30)
+    duration_label: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     # Delivery content attributes
     text_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

@@ -27,16 +27,51 @@ from bot.keyboards.admin_kb import (
     admin_main_kb,
     cancel_admin_action_kb,
     confirm_broadcast_kb,
+    confirm_delete_product_kb,
+    product_management_detail_kb,
     product_warranty_action_kb,
     select_category_kb,
     select_discount_type_kb,
+    select_duration_kb,
     select_product_for_stock_kb,
     select_product_for_warranty_kb,
+    select_product_to_manage_kb,
     select_product_type_kb,
     select_warranty_kb,
 )
 
 router = Router(name="admin_router")
+
+
+def parse_duration(text: str) -> tuple[Optional[int], str]:
+    """Mengubah input durasi natural menjadi tuple (duration_days, duration_label)."""
+    text_clean = text.strip()
+    lower = text_clean.lower()
+    
+    if lower in ("0", "lifetime", "permanen", "permanent", "selamanya", "-", "life time"):
+        return None, "Lifetime / Permanen"
+    
+    import re
+    m = re.match(r"^(\d+)\s*(hari|day|days|bulan|bln|month|months|tahun|thn|year|years)?$", lower)
+    if m:
+        val = int(m.group(1))
+        unit = m.group(2) or "hari"
+        if any(x in unit for x in ("bulan", "bln", "month")):
+            return val * 30, f"{val} Bulan"
+        elif any(x in unit for x in ("tahun", "thn", "year")):
+            return val * 365, f"{val} Tahun"
+        elif any(x in unit for x in ("hari", "day")):
+            return val, f"{val} Hari"
+        else:
+            return val, f"{val} Hari"
+    
+    nums = re.findall(r"\d+", lower)
+    days = int(nums[0]) if nums else 30
+    if any(x in lower for x in ("bulan", "bln", "month")):
+        days = days * 30
+    elif any(x in lower for x in ("tahun", "thn", "year")):
+        days = days * 365
+    return days, text_clean
 
 
 # ==========================================
@@ -57,6 +92,10 @@ class AddProductState(StatesGroup):
     waiting_for_stock = State()
     waiting_for_warranty_choice = State()
     waiting_for_warranty_custom = State()
+
+
+class EditDurationState(StatesGroup):
+    waiting_for_duration = State()
 
 
 class AddStockState(StatesGroup):
@@ -255,26 +294,74 @@ async def process_product_name(message: Message, state: FSMContext) -> None:
     await state.set_state(AddProductState.waiting_for_duration)
 
     await message.answer(
-        "⏱️ <b>LANGKAH 4/6: MASA AKTIF / DURASI (HARI)</b>\n\n"
-        "Berapa hari masa aktif langganan akun ini?\n"
-        "<i>(Ketik <code>30</code> untuk 1 bulan, <code>7</code> untuk 1 minggu, atau <code>0</code> jika masa aktif permanen/lifetime)</i>",
+        "⏱️ <b>LANGKAH 4/8: MASA AKTIF / DURASI LANGGANAN</b>\n\n"
+        "Pilih tombol cepat di bawah, atau <b>ketik bebas durasi kustom Anda</b>:\n"
+        "<i>(Contoh ketik: <code>18 Bulan</code>, <code>1 Tahun</code>, <code>30 Hari</code>, atau <code>Lifetime</code>)</i>",
+        reply_markup=select_duration_kb(prefix="adm_newp_dur"),
         parse_mode="HTML",
     )
 
 
+@router.callback_query(AddProductState.waiting_for_duration, F.data.startswith("adm_newp_dur_"))
+async def cb_pick_new_product_duration(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    if not callback.data:
+        return
+    code = callback.data.replace("adm_newp_dur_", "")
+    if code == "1M":
+        days, label = 30, "1 Bulan"
+    elif code == "3M":
+        days, label = 90, "3 Bulan"
+    elif code == "6M":
+        days, label = 180, "6 Bulan"
+    elif code == "1Y":
+        days, label = 365, "1 Tahun"
+    elif code == "18M":
+        days, label = 540, "18 Bulan"
+    elif code == "LIFETIME":
+        days, label = None, "Lifetime / Permanen"
+    elif code == "CUSTOM_TYPING":
+        if isinstance(callback.message, Message):
+            await callback.message.edit_text(
+                "✍️ <b>KETIK DURASI KUSTOM SENDIRI</b>\n\n"
+                "Silakan ketik masa aktif produk ini di kolom chat:\n"
+                "<i>(Contoh: <code>18 Bulan</code>, <code>14 Hari</code>, <code>2 Tahun</code>, atau <code>Lifetime</code>)</i>",
+                reply_markup=cancel_admin_action_kb(),
+                parse_mode="HTML",
+            )
+        await callback.answer()
+        return
+    else:
+        days, label = 30, "1 Bulan"
+
+    await state.update_data(duration_days=days, duration_label=label)
+    await state.set_state(AddProductState.waiting_for_price)
+
+    text = (
+        f"⏱️ Masa aktif diatur: <b>{label}</b>\n\n"
+        "💵 <b>LANGKAH 5/8: HARGA PRODUK</b>\n\n"
+        "Masukkan nominal harga produk dalam Rupiah (hanya angka):\n"
+        "<i>(Contoh: 35000 atau 21000)</i>"
+    )
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(text=text, reply_markup=cancel_admin_action_kb(), parse_mode="HTML")
+    await callback.answer()
+
+
 @router.message(AddProductState.waiting_for_duration)
 async def process_product_duration(message: Message, state: FSMContext) -> None:
-    try:
-        dur = int(message.text.strip())
-    except ValueError:
-        dur = 30
-    await state.update_data(duration_days=dur if dur > 0 else None)
+    raw_text = (message.text or "").strip()
+    days, label = parse_duration(raw_text)
+
+    await state.update_data(duration_days=days, duration_label=label)
     await state.set_state(AddProductState.waiting_for_price)
 
     await message.answer(
-        "💵 <b>LANGKAH 5/6: HARGA PRODUK</b>\n\n"
+        f"⏱️ Masa aktif diatur: <b>{label}</b>\n\n"
+        "💵 <b>LANGKAH 5/8: HARGA PRODUK</b>\n\n"
         "Masukkan nominal harga produk dalam Rupiah (hanya angka):\n"
-        "<i>(Contoh: 35000)</i>",
+        "<i>(Contoh: 35000 atau 21000)</i>",
         parse_mode="HTML",
     )
 
@@ -453,6 +540,7 @@ async def finalize_create_product(
         price=data["price"],
         product_type=p_type,
         duration_days=data.get("duration_days", 30),
+        duration_label=data.get("duration_label"),
         description=data.get("description"),
         text_content=data.get("text_content"),
         telegram_file_id=data.get("telegram_file_id"),
@@ -470,13 +558,14 @@ async def finalize_create_product(
 
     await state.clear()
 
+    dur_str = product.duration_label or (f"{product.duration_days} Hari" if product.duration_days else "Lifetime / Permanen")
     war_badge = "❌ Tidak Ada Garansi" if warranty_type == "NONE" else ("⚡ Garansi 24 Jam" if warranty_type == "24_HOURS" else "📝 Custom Garansi")
     formatted_price = f"Rp {product.price:,.0f}".replace(",", ".")
     msg_text = (
         f"🎉 <b>PRODUK BERHASIL DITAMBAHKAN!</b>\n\n"
         f"📦 <b>Nama:</b> {product.name}\n"
         f"💵 <b>Harga:</b> {formatted_price}\n"
-        f"⏱️ <b>Masa Aktif:</b> {product.duration_days or 'Lifetime'} Hari\n"
+        f"⏱️ <b>Masa Aktif:</b> {dur_str}\n"
         f"🏷️ <b>Tipe:</b> <code>{product.product_type}</code>\n"
         f"🟢 <b>Jumlah Stok:</b> <code>{total_added} item</code>\n"
         f"🛡️ <b>Garansi:</b> <b>{war_badge}</b>\n"
@@ -496,6 +585,251 @@ async def finalize_create_product(
             reply_markup=admin_main_kb(),
             parse_mode="HTML",
         )
+
+
+# ==========================================
+# 2.5 KELOLA & CEK DAFTAR PRODUK (ADMIN)
+# ==========================================
+@router.callback_query(F.data == "admin_manage_products")
+async def cb_manage_products(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    stmt = select(Product).order_by(Product.id.desc())
+    res = await session.execute(stmt)
+    products = list(res.scalars().all())
+
+    if not products:
+        text = (
+            "📋 <b>KELOLA PRODUK</b>\n\n"
+            "Belum ada produk di database. Silakan buat produk baru dengan tombol di bawah:"
+        )
+        if isinstance(callback.message, Message):
+            await callback.message.edit_text(
+                text=text,
+                reply_markup=select_product_to_manage_kb([]),
+                parse_mode="HTML",
+            )
+        await callback.answer()
+        return
+
+    text = (
+        f"📋 <b>DAFTAR & KELOLA PRODUK ({len(products)} Produk)</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Pilih produk di bawah untuk melihat rincian lengkap, mengubah masa aktif, "
+        f"mengatur garansi, menambah stok, atau menghapus produk:"
+    )
+
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=select_product_to_manage_kb(products),
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_prod_view_"))
+async def cb_view_admin_product_detail(
+    callback: CallbackQuery, session: AsyncSession, state: FSMContext
+) -> None:
+    await state.clear()
+    if not callback.data:
+        return
+    product_id = int(callback.data.replace("adm_prod_view_", ""))
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+
+    if not product:
+        await callback.answer("Produk tidak ditemukan!", show_alert=True)
+        return
+
+    # Hitung stok
+    if product.product_type == "TEXT_STOCK":
+        stock_count = await crud.count_available_stock(session=session, product_id=product.id)
+        stock_str = f"{stock_count} Akun / Key"
+    elif product.product_type == "TEXT_STATIC":
+        stock_str = "Teks Statis / Link (Instan)"
+    elif product.product_type == "FILE":
+        stock_str = "File Digital (Instan)"
+    else:
+        stock_str = "Akses VIP (Instan)"
+
+    buyers = await crud.get_product_buyers(session=session, product_id=product.id)
+    dur_str = product.duration_label or (f"{product.duration_days} Hari" if product.duration_days else "Lifetime / Permanen")
+    war_badge = "❌ Tidak Ada Garansi" if product.warranty_type == "NONE" else ("⚡ Garansi 24 Jam" if product.warranty_type == "24_HOURS" else "📝 Custom Garansi")
+    formatted_price = f"Rp {product.price:,.0f}".replace(",", ".")
+
+    content_preview = ""
+    if product.text_content:
+        content_preview = f"\n\n🔗 <b>Isi Konten/Tautan:</b>\n<code>{product.text_content[:200]}...</code>" if len(product.text_content) > 200 else f"\n\n🔗 <b>Isi Konten/Tautan:</b>\n<code>{product.text_content}</code>"
+
+    desc_display = f"\n\n📝 <b>Deskripsi:</b>\n<i>{product.description}</i>" if product.description else ""
+
+    text = (
+        f"📦 <b>DETAIL PRODUK: {product.name.upper()}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🆔 <b>ID Produk:</b> <code>#{product.id}</code>\n"
+        f"📁 <b>Kategori ID:</b> <code>#{product.category_id or '-'}</code>\n"
+        f"🏷️ <b>Tipe:</b> <code>{product.product_type}</code>\n"
+        f"💵 <b>Harga:</b> <code>{formatted_price}</code>\n"
+        f"⏱️ <b>Masa Aktif:</b> <b>{dur_str}</b>\n"
+        f"🟢 <b>Stok:</b> <code>{stock_str}</code>\n"
+        f"🛡️ <b>Garansi:</b> <b>{war_badge}</b>\n"
+        f"📝 <b>Note Garansi:</b> <i>{product.warranty_note or '-'}</i>\n"
+        f"👥 <b>Total Pembeli Lunas:</b> <code>{len(buyers)} Pengguna</code>"
+        f"{desc_display}"
+        f"{content_preview}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<i>Pilih menu kontrol di bawah:</i>"
+    )
+
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=product_management_detail_kb(product_id=product.id),
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_edit_dur_"))
+async def cb_prompt_edit_duration(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    if not callback.data:
+        return
+    product_id = int(callback.data.replace("adm_edit_dur_", ""))
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+    if not product:
+        await callback.answer("Produk tidak ditemukan!", show_alert=True)
+        return
+
+    await state.update_data(edit_dur_product_id=product_id)
+    await state.set_state(EditDurationState.waiting_for_duration)
+
+    curr_dur = product.duration_label or (f"{product.duration_days} Hari" if product.duration_days else "Lifetime")
+    text = (
+        f"⏱️ <b>UBAH MASA AKTIF: {product.name}</b>\n\n"
+        f"Masa aktif saat ini: <b>{curr_dur}</b>\n\n"
+        f"Pilih opsi durasi di bawah atau <b>ketik masa aktif kustom langsung</b> di chat:\n"
+        f"<i>(Contoh ketik: <code>18 Bulan</code>, <code>1 Tahun</code>, <code>6 Bulan</code>, <code>30 Hari</code>, atau <code>Lifetime</code>)</i>"
+    )
+
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=select_duration_kb(prefix=f"adm_setdur_{product_id}"),
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_setdur_"))
+async def cb_save_edited_duration(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    if not callback.data:
+        return
+    parts = callback.data.split("_")
+    # adm_setdur_{product_id}_{code}
+    product_id = int(parts[2])
+    code = parts[3]
+
+    if code == "1M":
+        days, label = 30, "1 Bulan"
+    elif code == "3M":
+        days, label = 90, "3 Bulan"
+    elif code == "6M":
+        days, label = 180, "6 Bulan"
+    elif code == "1Y":
+        days, label = 365, "1 Tahun"
+    elif code == "18M":
+        days, label = 540, "18 Bulan"
+    elif code == "LIFETIME":
+        days, label = None, "Lifetime / Permanen"
+    elif code == "CUSTOM_TYPING":
+        await state.update_data(edit_dur_product_id=product_id)
+        await state.set_state(EditDurationState.waiting_for_duration)
+        if isinstance(callback.message, Message):
+            await callback.message.edit_text(
+                "✍️ <b>KETIK MASA AKTIF KUSTOM</b>\n\n"
+                "Silakan ketik masa aktif produk ini di kolom chat:\n"
+                "<i>(Contoh: <code>18 Bulan</code>, <code>14 Hari</code>, <code>2 Tahun</code>, atau <code>Lifetime</code>)</i>",
+                reply_markup=cancel_admin_action_kb(),
+                parse_mode="HTML",
+            )
+        await callback.answer()
+        return
+    else:
+        days, label = 30, "1 Bulan"
+
+    await state.clear()
+    await crud.update_product_duration(session=session, product_id=product_id, duration_days=days, duration_label=label)
+    await callback.answer(f"✅ Masa aktif berhasil diubah menjadi: {label}!", show_alert=True)
+    
+    # Reload detail view
+    callback.data = f"adm_prod_view_{product_id}"
+    await cb_view_admin_product_detail(callback=callback, session=session, state=state)
+
+
+@router.message(EditDurationState.waiting_for_duration)
+async def process_custom_edit_duration(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    data = await state.get_data()
+    product_id = data["edit_dur_product_id"]
+    await state.clear()
+
+    raw_text = (message.text or "").strip()
+    days, label = parse_duration(raw_text)
+
+    product = await crud.update_product_duration(session=session, product_id=product_id, duration_days=days, duration_label=label)
+
+    await message.answer(
+        f"✅ <b>MASA AKTIF BERHASIL DIUBAH!</b>\n\n"
+        f"📦 Produk: <b>{product.name if product else '-'}</b>\n"
+        f"⏱️ Masa Aktif Baru: <b>{label}</b>",
+        reply_markup=product_management_detail_kb(product_id=product_id),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("adm_del_prod_"))
+async def cb_prompt_delete_product(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    if not callback.data:
+        return
+    product_id = int(callback.data.replace("adm_del_prod_", ""))
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+    if not product:
+        await callback.answer("Produk tidak ditemukan!", show_alert=True)
+        return
+
+    text = (
+        f"⚠️ <b>KONFIRMASI HAPUS PRODUK</b>\n\n"
+        f"Apakah Anda yakin ingin menghapus produk <b>{product.name}</b>?\n"
+        f"Tindakan ini akan menghapus produk dan stok terkait secara permanen!"
+    )
+
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=confirm_delete_product_kb(product_id=product.id),
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_confirm_del_"))
+async def cb_confirm_delete_product(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    if not callback.data:
+        return
+    product_id = int(callback.data.replace("adm_confirm_del_", ""))
+    await crud.delete_product(session=session, product_id=product_id)
+    await callback.answer("✅ Produk berhasil dihapus!", show_alert=True)
+    await cb_manage_products(callback=callback, session=session)
 
 
 # ==========================================
