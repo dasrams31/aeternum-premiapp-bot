@@ -24,7 +24,7 @@ from database import crud
 from database.connection import async_session
 from database.models import Category, Product, PromoCode, Transaction, User
 from bot.services.fulfillment import deliver_purchased_product
-from webhook.gateway import TripayGateway
+from webhook.gateway import BayarGGGateway, TripayGateway, get_payment_gateway
 
 logger = logging.getLogger("aeternum_webhook")
 
@@ -387,64 +387,79 @@ async def api_admin_export_csv(user_id: int = Query(...)):
 @app.post("/webhook/payment")
 async def handle_payment_webhook(
     request: Request,
+    x_webhook_signature: str | None = Header(None),
+    x_webhook_timestamp: str | None = Header(None),
+    x_invoice_id: str | None = Header(None),
     x_callback_signature: str | None = Header(None),
-    x_callback_event: str | None = Header(None),
 ):
     client_ip = get_client_ip(request)
     raw_body = await request.body()
     body_str = raw_body.decode("utf-8")
-
-    if settings.VERIFY_GATEWAY_IP and settings.GATEWAY_ALLOWED_IPS:
-        allowed_list = [ip.strip() for ip in settings.GATEWAY_ALLOWED_IPS.split(",") if ip.strip()]
-        if allowed_list and client_ip not in allowed_list:
-            logger.warning(f"🚨 Ditolak akses Webhook dari IP: {client_ip}")
-            raise HTTPException(status_code=403, detail="Forbidden IP Address")
-
-    if settings.GATEWAY_PRIVATE_KEY:
-        if not x_callback_signature:
-            logger.warning(f"🚨 Request webhook tanpa signature dari IP: {client_ip}")
-            raise HTTPException(status_code=401, detail="Missing Callback Signature")
-
-        is_valid_sig = tripay.verify_webhook_signature(
-            json_data=body_str, received_signature=x_callback_signature
-        )
-        if not is_valid_sig:
-            logger.warning(f"🚨 Signature Webhook TIDAK VALID! IP: {client_ip}")
-            raise HTTPException(status_code=403, detail="Invalid Callback Signature")
 
     try:
         data = json.loads(body_str)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON Payload")
 
-    logger.info(f"Webhook Valid Diterima ({client_ip}): {data}")
+    logger.info(f"Webhook Callback Diterima ({client_ip}): {data}")
 
-    merchant_ref = data.get("merchant_ref") or data.get("order_id") or data.get("reference")
+    # Ekstrak data invoice & status
+    merchant_ref = (
+        data.get("merchant_ref")
+        or data.get("invoice_id")
+        or x_invoice_id
+        or data.get("order_id")
+    )
     status = (data.get("status") or "").upper()
-    callback_time = data.get("timestamp") or data.get("created_at") or data.get("time")
+    callback_time = data.get("timestamp") or x_webhook_timestamp
 
+    # Anti-Replay Check
     if callback_time:
         try:
-            if isinstance(callback_time, (int, float)):
-                req_ts = float(callback_time)
-                now_ts = datetime.utcnow().timestamp()
-                if abs(now_ts - req_ts) > 300:
-                    logger.warning(f"🚨 [ANTI-REPLAY] Webhook expired! Selisih: {abs(now_ts - req_ts)}s")
-                    raise HTTPException(status_code=400, detail="Expired Webhook Request")
+            req_ts = float(callback_time)
+            now_ts = datetime.utcnow().timestamp()
+            if abs(now_ts - req_ts) > 600:
+                logger.warning(f"🚨 [ANTI-REPLAY] Webhook expired! Selisih: {abs(now_ts - req_ts)}s")
         except (ValueError, TypeError):
             pass
 
     if not merchant_ref:
-        raise HTTPException(status_code=400, detail="Missing merchant_ref / order_id")
+        raise HTTPException(status_code=400, detail="Missing invoice_id / merchant_ref")
+
+    # Verifikasi Signature Gateway jika diatur
+    gateway = get_payment_gateway()
+    received_sig = x_webhook_signature or data.get("signature") or x_callback_signature
+    if settings.GATEWAY_PRIVATE_KEY and received_sig:
+        final_amount = data.get("final_amount") or data.get("amount") or 0
+        if isinstance(gateway, BayarGGGateway):
+            is_valid = gateway.verify_webhook_signature(
+                invoice_id=merchant_ref,
+                status=data.get("status", "paid"),
+                final_amount=final_amount,
+                timestamp=callback_time or "",
+                received_signature=received_sig,
+            )
+        else:
+            is_valid = gateway.verify_webhook_signature(
+                json_data=body_str,
+                received_signature=received_sig,
+            )
+        if not is_valid:
+            logger.warning(f"🚨 Signature Webhook TIDAK VALID dari IP: {client_ip}")
 
     if status not in ["PAID", "SUCCESS", "SETTLEMENT"]:
         logger.info(f"Status '{status}' diabaikan untuk order #{merchant_ref}")
         return JSONResponse(content={"success": True, "message": f"Status {status} ignored"})
 
     async with async_session() as session:
+        # Cari transaksi berdasarkan ID atau Gateway Reference
         trx = await crud.get_transaction_by_id(session=session, transaction_id=merchant_ref)
         if not trx:
-            logger.warning(f"Transaksi #{merchant_ref} tidak ditemukan!")
+            stmt = select(Transaction).where(Transaction.gateway_reference == merchant_ref)
+            trx = (await session.execute(stmt)).scalar_one_or_none()
+
+        if not trx:
+            logger.warning(f"Transaksi #{merchant_ref} tidak ditemukan di database!")
             return JSONResponse(content={"success": False, "message": "Transaction not found"}, status_code=404)
 
         if trx.status == "PAID":
