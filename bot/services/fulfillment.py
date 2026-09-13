@@ -55,6 +55,10 @@ async def deliver_purchased_product(
                 return False
 
             delivered_text = item.content
+            
+            war_badge = "❌ Tidak Ada Garansi" if product.warranty_type == "NONE" else ("⚡ Garansi 24 Jam" if product.warranty_type == "24_HOURS" else "📝 Garansi Khusus")
+            war_desc = f"\n<i>{product.warranty_note}</i>" if product.warranty_note else ""
+
             message_text = (
                 f"🎉 <b>PEMBAYARAN BERHASIL & TERKONFIRMASI!</b>\n\n"
                 f"📦 <b>Produk:</b> {product.name}\n"
@@ -63,6 +67,9 @@ async def deliver_purchased_product(
                 f"🔑 <b>DETAIL KREDENSIAL / LISENSI ANDA:</b>\n\n"
                 f"<code>{delivered_text}</code>\n\n"
                 f"<i>💡 Ketuk kotak abu-abu di atas untuk menyalin langsung.</i>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🛡️ <b>KETENTUAN GARANSI:</b>\n"
+                f"<b>{war_badge}</b>{war_desc}\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"⚠️ <i>Simpan kredensial ini. Riwayat tersimpan di menu /riwayat.</i>"
             )
@@ -79,6 +86,9 @@ async def deliver_purchased_product(
         # ==========================================
         elif product.product_type == "TEXT_STATIC":
             delivered_text = product.text_content or "Tidak ada teks konten."
+            war_badge = "❌ Tidak Ada Garansi" if product.warranty_type == "NONE" else ("⚡ Garansi 24 Jam" if product.warranty_type == "24_HOURS" else "📝 Garansi Khusus")
+            war_desc = f"\n<i>{product.warranty_note}</i>" if product.warranty_note else ""
+
             message_text = (
                 f"🎉 <b>PEMBAYARAN BERHASIL & TERKONFIRMASI!</b>\n\n"
                 f"📦 <b>Produk:</b> {product.name}\n"
@@ -86,6 +96,9 @@ async def deliver_purchased_product(
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"📝 <b>KONTEN PRODUK / AKSES:</b>\n\n"
                 f"{delivered_text}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🛡️ <b>KETENTUAN GARANSI:</b>\n"
+                f"<b>{war_badge}</b>{war_desc}\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"Terima kasih telah berbelanja di <b>Aeternum PremiApp Bot</b>!"
             )
@@ -105,10 +118,14 @@ async def deliver_purchased_product(
                 logger.error(f"File ID kosong untuk produk #{product.id}")
                 return False
 
+            war_badge = "❌ Tidak Ada Garansi" if product.warranty_type == "NONE" else ("⚡ Garansi 24 Jam" if product.warranty_type == "24_HOURS" else "📝 Garansi Khusus")
+            war_desc = f"\n<i>{product.warranty_note}</i>" if product.warranty_note else ""
+
             caption = (
                 f"🎉 <b>PEMBAYARAN BERHASIL!</b>\n\n"
                 f"📦 <b>Produk:</b> {product.name}\n"
                 f"🧾 <b>No. Invoice:</b> <code>{transaction.id}</code>\n\n"
+                f"🛡️ <b>Ketentuan Garansi:</b> <b>{war_badge}</b>{war_desc}\n\n"
                 f"File produk Anda terlampir di atas. Selamat menikmati!"
             )
 
@@ -129,6 +146,9 @@ async def deliver_purchased_product(
                 logger.error(f"VIP Chat ID kosong untuk produk #{product.id}")
                 return False
 
+            war_badge = "❌ Tidak Ada Garansi" if product.warranty_type == "NONE" else ("⚡ Garansi 24 Jam" if product.warranty_type == "24_HOURS" else "📝 Garansi Khusus")
+            war_desc = f"\n<i>{product.warranty_note}</i>" if product.warranty_note else ""
+
             invite_link = await bot.create_chat_invite_link(
                 chat_id=product.vip_chat_id,
                 member_limit=1,
@@ -143,7 +163,10 @@ async def deliver_purchased_product(
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🔗 <b>TAUTAN UNDANGAN VIP ANDA:</b>\n\n"
                 f"👉 <a href='{invite_link.invite_link}'>Klik Di Sini untuk Bergabung</a>\n\n"
-                f"<i>⚠️ Tautan ini eksklusif dan hanya berlaku untuk 1 kali penggunaan.</i>"
+                f"<i>⚠️ Tautan ini eksklusif dan hanya berlaku untuk 1 kali penggunaan.</i>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🛡️ <b>KETENTUAN GARANSI:</b>\n"
+                f"<b>{war_badge}</b>{war_desc}\n"
             )
 
             await bot.send_message(

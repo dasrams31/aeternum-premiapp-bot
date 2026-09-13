@@ -293,6 +293,8 @@ async def create_product(
     text_content: Optional[str] = None,
     telegram_file_id: Optional[str] = None,
     vip_chat_id: Optional[int] = None,
+    warranty_type: str = "NONE",
+    warranty_note: Optional[str] = None,
 ) -> Product:
     product = Product(
         category_id=category_id,
@@ -304,11 +306,44 @@ async def create_product(
         text_content=text_content,
         telegram_file_id=telegram_file_id,
         vip_chat_id=vip_chat_id,
+        warranty_type=warranty_type,
+        warranty_note=warranty_note,
     )
     session.add(product)
     await session.commit()
     await session.refresh(product)
     return product
+
+
+async def update_product_warranty(
+    session: AsyncSession,
+    product_id: int,
+    warranty_type: str,
+    warranty_note: Optional[str] = None,
+) -> Optional[Product]:
+    product = await get_product_by_id(session, product_id)
+    if product:
+        product.warranty_type = warranty_type
+        product.warranty_note = warranty_note
+        await session.commit()
+        await session.refresh(product)
+    return product
+
+
+async def get_product_buyers(
+    session: AsyncSession, product_id: int
+) -> List[int]:
+    """Mengambil list User ID pembeli yang pernah membeli produk ini (berstatus PAID)."""
+    stmt = (
+        select(Transaction.user_id)
+        .where(
+            Transaction.product_id == product_id,
+            Transaction.status == "PAID",
+        )
+        .distinct()
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
 
 
 # ==========================================

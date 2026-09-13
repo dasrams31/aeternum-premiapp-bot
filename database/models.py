@@ -100,6 +100,10 @@ class Product(Base):
     telegram_file_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     vip_chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     
+    # Ketentuan Garansi Produk: 'NONE', '24_HOURS', 'CUSTOM'
+    warranty_type: Mapped[str] = mapped_column(String(50), default="NONE")
+    warranty_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

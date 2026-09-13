@@ -132,12 +132,17 @@ async def cb_show_product_detail(
     desc_text = product.description or "Tidak ada deskripsi tambahan."
     duration_info = f"\n⏱️ <b>Masa Aktif:</b> <code>{product.duration_days} Hari</code>" if product.duration_days else ""
 
+    war_badge = "❌ Tidak Ada Garansi" if product.warranty_type == "NONE" else ("⚡ Garansi 24 Jam" if product.warranty_type == "24_HOURS" else "📝 Garansi Khusus")
+    war_info = f"\n🛡️ <b>Garansi:</b> <b>{war_badge}</b>"
+    if product.warranty_note:
+        war_info += f" <i>({product.warranty_note})</i>"
+
     text = (
         f"📦 <b>DETAIL PRODUK: {product.name.upper()}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"💵 <b>Harga:</b> <code>{formatted_price}</code>\n"
         f"💳 <b>Saldo Anda:</b> <code>{formatted_balance}</code>\n"
-        f"{stock_info}{duration_info}\n"
+        f"{stock_info}{duration_info}{war_info}\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📝 <b>Deskripsi & Ketentuan:</b>\n"
         f"{desc_text}\n\n"

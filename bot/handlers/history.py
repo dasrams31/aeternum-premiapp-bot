@@ -87,6 +87,12 @@ async def cb_view_history_detail(
 
     content_display = trx.delivered_content or "Tidak ada konten tersimpan atau pesanan belum dibayar."
 
+    war_section = ""
+    if product:
+        war_badge = "❌ Tidak Ada Garansi" if product.warranty_type == "NONE" else ("⚡ Garansi 24 Jam" if product.warranty_type == "24_HOURS" else "📝 Garansi Khusus")
+        war_note = f" <i>({product.warranty_note})</i>" if product.warranty_note else ""
+        war_section = f"🛡️ <b>Garansi:</b> {war_badge}{war_note}\n"
+
     text = (
         f"🧾 <b>RINCIAN PESANAN #{trx.id}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -94,6 +100,7 @@ async def cb_view_history_detail(
         f"💵 <b>Total:</b> <code>{formatted_price}</code>\n"
         f"📊 <b>Status:</b> <b>{status_badge}</b>\n"
         f"📅 <b>Waktu:</b> {date_str}\n"
+        f"{war_section}"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🔑 <b>KONTEN PRODUK YANG DITERIMA:</b>\n\n"
         f"<code>{content_display}</code>\n"
