@@ -30,6 +30,9 @@ class User(Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     
+    # Saldo Utama & Dompet Internal
+    balance: Mapped[float] = mapped_column(Numeric(12, 2), default=0.0)
+    
     # Afiliasi & Referral
     referred_by: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     referral_balance: Mapped[float] = mapped_column(Numeric(12, 2), default=0.0)
@@ -44,7 +47,7 @@ class User(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<User id={self.id} username='{self.username}'>"
+        return f"<User id={self.id} username='{self.username}' balance={self.balance}>"
 
 
 class Category(Base):
@@ -132,7 +135,7 @@ class PromoCode(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
-    discount_type: Mapped[str] = mapped_column(String(20), default="PERCENT")  # 'PERCENT' or 'FIXED'
+    discount_type: Mapped[str] = mapped_column(String(20), default="PERCENT")
     discount_value: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     min_purchase: Mapped[float] = mapped_column(Numeric(12, 2), default=0.0)
     max_discount: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)
@@ -147,9 +150,6 @@ class PromoCode(Base):
     usages: Mapped[List["PromoUsage"]] = relationship(
         "PromoUsage", back_populates="promo", cascade="all, delete-orphan"
     )
-
-    def __repr__(self) -> str:
-        return f"<PromoCode code='{self.code}' value={self.discount_value}>"
 
 
 class PromoUsage(Base):
@@ -178,13 +178,20 @@ class Transaction(Base):
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    product_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False
+    # product_id opsional jika transaksi adalah TOPUP deposit
+    product_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("products.id", ondelete="RESTRICT"), nullable=True
     )
+    
+    # 'PURCHASE' atau 'TOPUP'
+    trx_type: Mapped[str] = mapped_column(String(20), default="PURCHASE", index=True)
+    # 'QRIS' atau 'BALANCE'
+    payment_method: Mapped[str] = mapped_column(String(30), default="QRIS")
+
     original_amount: Mapped[float] = mapped_column(Numeric(12, 2), default=0.0)
     discount_amount: Mapped[float] = mapped_column(Numeric(12, 2), default=0.0)
     promo_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)  # Final amount to pay
+    amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     
     qris_string: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     qris_image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -204,7 +211,7 @@ class Transaction(Base):
     )
 
     user: Mapped["User"] = relationship("User", back_populates="transactions")
-    product: Mapped["Product"] = relationship("Product", back_populates="transactions")
+    product: Mapped[Optional["Product"]] = relationship("Product", back_populates="transactions")
 
     def __repr__(self) -> str:
-        return f"<Transaction id='{self.id}' amount={self.amount} status='{self.status}'>"
+        return f"<Transaction id='{self.id}' type='{self.trx_type}' amount={self.amount} status='{self.status}'>"

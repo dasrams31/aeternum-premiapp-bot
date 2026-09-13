@@ -1,9 +1,10 @@
 """
 Aeternum PremiApp Bot - Admin Management & FSM Handlers
-Panel khusus Admin untuk tambah produk, input stok akun massal, kupon diskon, dan laporan.
+Panel khusus Admin untuk tambah produk, input stok akun massal, kupon diskon, broadcast, dan laporan.
 """
 
-from aiogram import F, Router
+import asyncio
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -17,6 +18,7 @@ from database.models import Category, Product, PromoCode, Transaction
 from bot.keyboards.admin_kb import (
     admin_main_kb,
     cancel_admin_action_kb,
+    confirm_broadcast_kb,
     select_category_kb,
     select_discount_type_kb,
     select_product_for_stock_kb,
@@ -55,7 +57,11 @@ class AddPromoState(StatesGroup):
     waiting_for_max_usage = State()
 
 
-# Middleware filter hanya admin
+class BroadcastState(StatesGroup):
+    waiting_for_message = State()
+    waiting_for_confirmation = State()
+
+
 def is_admin_filter(user_id: int) -> bool:
     return user_id == settings.ADMIN_ID
 
@@ -65,7 +71,6 @@ def is_admin_filter(user_id: int) -> bool:
 async def show_admin_dashboard(
     event: Message | CallbackQuery, state: FSMContext
 ) -> None:
-    """Menampilkan Beranda Panel Admin Toko."""
     user = event.from_user
     if not user or not is_admin_filter(user.id):
         return
@@ -369,7 +374,6 @@ async def process_stock_paste(
 # ==========================================
 @router.callback_query(F.data == "admin_add_promo")
 async def cb_start_add_promo(callback: CallbackQuery, state: FSMContext) -> None:
-    """Mulai wizard tambah kode voucher promo."""
     await state.set_state(AddPromoState.waiting_for_code)
     text = (
         "🎟️ <b>LANGKAH 1/4: BUAT KODE PROMO BARU</b>\n\n"
@@ -467,7 +471,94 @@ async def process_promo_final(
 
 
 # ==========================================
-# 5. LAPORAN OMSET & TRANSAKSI
+# 5. BROADCAST NOTIFIKASI MASSAL
+# ==========================================
+@router.callback_query(F.data == "admin_broadcast")
+async def cb_start_broadcast(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    user_ids = await crud.get_all_user_ids(session=session)
+    await state.set_state(BroadcastState.waiting_for_message)
+
+    text = (
+        f"📢 <b>BROADCAST PESAN MASSAL</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Total Penerima Terdaftar: <b>{len(user_ids)} Pengguna</b>\n\n"
+        f"Silakan kirim pesan yang ingin disiarkan ke seluruh pengguna (bisa berupa teks, foto + teks, atau dokumen):"
+    )
+    if callback.message:
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=cancel_admin_action_kb(),
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.message(BroadcastState.waiting_for_message)
+async def process_broadcast_input(message: Message, state: FSMContext) -> None:
+    # Simpan message_id dan chat_id untuk dicopy saat broadcast
+    await state.update_data(
+        broadcast_chat_id=message.chat.id,
+        broadcast_msg_id=message.message_id,
+    )
+    await state.set_state(BroadcastState.waiting_for_confirmation)
+
+    await message.answer(
+        "👁️ <b>PREVIEW PESAN BROADCAST TERVERIFIKASI</b>\n\n"
+        "Pesan di atas akan dikirimkan ke seluruh pengguna bot. Apakah Anda yakin ingin melanjutkan?",
+        reply_markup=confirm_broadcast_kb(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(BroadcastState.waiting_for_confirmation, F.data == "confirm_send_broadcast")
+async def cb_execute_broadcast(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot: Bot
+) -> None:
+    data = await state.get_data()
+    src_chat_id = data["broadcast_chat_id"]
+    src_msg_id = data["broadcast_msg_id"]
+    await state.clear()
+
+    user_ids = await crud.get_all_user_ids(session=session)
+    if callback.message:
+        await callback.message.edit_text("⏳ <i>Sedang mengirimkan siaran pesan... Mohon tunggu.</i>", parse_mode="HTML")
+
+    success_count = 0
+    failed_count = 0
+
+    for uid in user_ids:
+        try:
+            await bot.copy_message(
+                chat_id=uid,
+                from_chat_id=src_chat_id,
+                message_id=src_msg_id,
+            )
+            success_count += 1
+            await asyncio.sleep(0.05)  # Anti flood-limit (max 20-30 msg/sec)
+        except Exception:
+            failed_count += 1
+
+    summary_text = (
+        f"✅ <b>BROADCAST SELESAI DIKIRIMKAN!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🟢 <b>Berhasil Terkirim:</b> {success_count} Pengguna\n"
+        f"🔴 <b>Gagal / Diblokir:</b> {failed_count} Pengguna\n"
+        f"👥 <b>Total Target:</b> {len(user_ids)} Pengguna"
+    )
+
+    if callback.message:
+        await callback.message.answer(
+            text=summary_text,
+            reply_markup=admin_main_kb(),
+            parse_mode="HTML",
+        )
+    await callback.answer("Broadcast selesai!")
+
+
+# ==========================================
+# 6. LAPORAN OMSET & TRANSAKSI
 # ==========================================
 @router.message(Command("laporan"))
 @router.callback_query(F.data == "admin_reports")

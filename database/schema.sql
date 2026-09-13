@@ -2,12 +2,13 @@
 -- Aeternum PremiApp Bot - PostgreSQL Database Schema
 -- ============================================================
 
--- 1. Tabel Users (Termasuk Afiliasi & Saldo Komisi)
+-- 1. Tabel Users (Termasuk Dompet Saldo & Afiliasi)
 CREATE TABLE IF NOT EXISTS users (
     id BIGINT PRIMARY KEY,               -- Telegram User ID
     username VARCHAR(100),
     first_name VARCHAR(150),
     is_admin BOOLEAN DEFAULT FALSE,
+    balance NUMERIC(12, 2) DEFAULT 0.0,  -- Saldo dompet internal
     referred_by BIGINT,                  -- ID Telegram Pengundang
     referral_balance NUMERIC(12, 2) DEFAULT 0.0, -- Saldo komisi referral
     total_referrals INT DEFAULT 0,       -- Jumlah teman yang diundang
@@ -31,9 +32,9 @@ CREATE TABLE IF NOT EXISTS products (
     description TEXT,
     price NUMERIC(12, 2) NOT NULL,
     product_type VARCHAR(50) NOT NULL, -- 'TEXT_STOCK', 'TEXT_STATIC', 'FILE', 'INVITE_LINK'
-    text_content TEXT,                 -- Digunakan jika tipe TEXT_STATIC
-    telegram_file_id TEXT,             -- Digunakan jika tipe FILE
-    vip_chat_id BIGINT,                -- Digunakan jika tipe INVITE_LINK
+    text_content TEXT,
+    telegram_file_id TEXT,
+    vip_chat_id BIGINT,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -79,15 +80,17 @@ CREATE TABLE IF NOT EXISTS transactions (
     id VARCHAR(50) PRIMARY KEY,          -- Format: AP-YYYYMMDD-XXXX
     user_id BIGINT REFERENCES users(id),
     product_id INT REFERENCES products(id),
+    trx_type VARCHAR(20) DEFAULT 'PURCHASE', -- 'PURCHASE' atau 'TOPUP'
+    payment_method VARCHAR(30) DEFAULT 'QRIS', -- 'QRIS' atau 'BALANCE'
     original_amount NUMERIC(12, 2) DEFAULT 0.0,
     discount_amount NUMERIC(12, 2) DEFAULT 0.0,
     promo_code VARCHAR(50),
-    amount NUMERIC(12, 2) NOT NULL,      -- Total akhir setelah diskon
-    qris_string TEXT,                    -- Payload QRIS
-    qris_image_url TEXT,                 -- URL Gambar QRIS dari gateway
-    gateway_reference VARCHAR(100),      -- Ref ID dari Payment Gateway
+    amount NUMERIC(12, 2) NOT NULL,
+    qris_string TEXT,
+    qris_image_url TEXT,
+    gateway_reference VARCHAR(100),
     status VARCHAR(30) DEFAULT 'PENDING',-- PENDING, PAID, EXPIRED, FAILED
-    delivered_content TEXT,              -- Salinan produk yang dikirimkan (arsip)
+    delivered_content TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     paid_at TIMESTAMP WITH TIME ZONE,
     expired_at TIMESTAMP WITH TIME ZONE

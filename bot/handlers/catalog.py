@@ -106,14 +106,18 @@ async def cb_show_category_products(
 async def cb_show_product_detail(
     callback: CallbackQuery, session: AsyncSession, state: FSMContext
 ) -> None:
-    """Menampilkan detail produk, harga, deskripsi, dan tombol checkout."""
+    """Menampilkan detail produk, harga, deskripsi, saldo, dan tombol checkout."""
     await state.clear()
+    user = callback.from_user
     product_id = int(callback.data.split("_")[1])
     product = await crud.get_product_by_id(session=session, product_id=product_id)
 
     if not product:
         await callback.answer("Produk tidak ditemukan!", show_alert=True)
         return
+
+    db_user = await crud.get_user_by_id(session=session, user_id=user.id)
+    user_balance = float(db_user.balance or 0.0) if db_user else 0.0
 
     is_available = True
     stock_info = "⚡ <b>Pengiriman:</b> Instan 24/7 (Teks / File)"
@@ -127,23 +131,30 @@ async def cb_show_product_detail(
             is_available = False
 
     formatted_price = f"Rp {product.price:,.0f}".replace(",", ".")
+    formatted_balance = f"Rp {user_balance:,.0f}".replace(",", ".")
     desc_text = product.description or "Tidak ada deskripsi tambahan."
 
     text = (
         f"📦 <b>DETAIL PRODUK: {product.name.upper()}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"💵 <b>Harga:</b> <code>{formatted_price}</code>\n"
+        f"💳 <b>Saldo Anda:</b> <code>{formatted_balance}</code>\n"
         f"{stock_info}\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📝 <b>Deskripsi & Ketentuan:</b>\n"
         f"{desc_text}\n\n"
-        f"<i>💡 Tekan tombol di bawah untuk membuat QRIS pembayaran.</i>"
+        f"<i>💡 Pilih opsi pembayaran di bawah untuk memproses pesanan:</i>"
     )
 
     if callback.message:
         await callback.message.edit_text(
             text=text,
-            reply_markup=product_detail_kb(product, is_available),
+            reply_markup=product_detail_kb(
+                product=product,
+                is_available=is_available,
+                user_balance=user_balance,
+                current_price=float(product.price),
+            ),
             parse_mode="HTML",
         )
     await callback.answer()
@@ -154,7 +165,6 @@ async def cb_show_product_detail(
 # ==========================================
 @router.callback_query(F.data.startswith("apply_promo_"))
 async def cb_prompt_promo(callback: CallbackQuery, state: FSMContext) -> None:
-    """Minta user mengetik kode promo."""
     product_id = int(callback.data.replace("apply_promo_", ""))
     await state.update_data(promo_product_id=product_id)
     await state.set_state(ApplyPromoState.waiting_for_code)
@@ -177,7 +187,6 @@ async def cb_prompt_promo(callback: CallbackQuery, state: FSMContext) -> None:
 async def process_promo_input(
     message: Message, state: FSMContext, session: AsyncSession
 ) -> None:
-    """Memproses input kode promo dan menampilkan harga diskon."""
     code_input = message.text.strip()
     data = await state.get_data()
     product_id = data.get("promo_product_id")
@@ -209,6 +218,9 @@ async def process_promo_input(
         final_price=final_price,
     )
 
+    db_user = await crud.get_user_by_id(session=session, user_id=message.from_user.id)
+    user_balance = float(db_user.balance or 0.0) if db_user else 0.0
+
     fmt_orig = f"Rp {product.price:,.0f}".replace(",", ".")
     fmt_disc = f"Rp {discount_amount:,.0f}".replace(",", ".")
     fmt_final = f"Rp {final_price:,.0f}".replace(",", ".")
@@ -222,12 +234,18 @@ async def process_promo_input(
         f"✂️ <b>Potongan Diskon:</b> -{fmt_disc}\n"
         f"💵 <b>Total Pembayaran:</b> <code>{fmt_final}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"<i>Tekan tombol di bawah untuk melanjutkan ke pembayaran QRIS:</i>"
+        f"<i>Pilih metode pembayaran di bawah untuk menyelesaikan pesanan:</i>"
     )
 
     await message.answer(
         text=text,
-        reply_markup=product_detail_kb(product, is_available=True, has_promo=True),
+        reply_markup=product_detail_kb(
+            product=product,
+            is_available=True,
+            user_balance=user_balance,
+            current_price=final_price,
+            has_promo=True,
+        ),
         parse_mode="HTML",
     )
 

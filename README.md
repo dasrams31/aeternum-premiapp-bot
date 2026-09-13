@@ -18,19 +18,22 @@
 1. **Pembayaran Otomatis QRIS Dinamis**:
    - Mendukung semua E-Wallet (GoPay, OVO, DANA, ShopeePay, LinkAja) dan Mobile Banking (BCA, Mandiri, BRI, BNI, dll).
    - Verifikasi transaksi instan secara real-time via Webhook.
-2. **Pengiriman Produk Instan**:
-   - Produk teks/akun/file langsung terkirim otomatis ke chat pembeli dalam hitungan detik setelah pembayaran terverifikasi.
+2. **💰 Dompet Saldo Internal (Instant 1-Second Checkout)**:
+   - Pengguna dapat melakukan deposit/top up saldo via QRIS.
+   - Pembelian produk dapat dibayar langsung menggunakan saldo tanpa perlu scan QRIS lagi.
 3. **🎟️ Sistem Kupon & Diskon Promo**:
    - Diskon berbasis persentase (`PERCENT`) atau potongan tetap (`FIXED`).
    - Validasi batas kuota klaim, minimal pembelian, dan pencegahan klaim ganda per user.
 4. **👥 Program Afiliasi & Referral Organik**:
    - Link referral unik per pengguna (`/start ref_USERID`).
    - Pembagian komisi otomatis 5% dari setiap pembelian teman langsung ke saldo komisi.
-5. **Panel Admin Interaktif di Telegram**:
-   - Wizard tambah kategori, produk, dan kupon promo langsung dari chat.
+5. **📢 Broadcast Notifikasi Massal (Admin Tool)**:
+   - Admin dapat mengirimkan siaran pesan promosi/restock ke seluruh pengguna terdaftar dengan preview & anti-flood protection.
+6. **Panel Admin Interaktif di Telegram**:
+   - Wizard tambah kategori, produk, kupon promo, dan broadcast langsung dari chat.
    - Bulk import stok teks/akun (paste multi-baris).
    - Notifikasi real-time ke DM Admin setiap ada penjualan atau stok menipis.
-6. **Keamanan & Anti-Fraud**:
+7. **Keamanan & Anti-Fraud**:
    - Transaksi concurrency lock (anti pembeli ganda pada 1 akun unik).
    - Parameter `protect_content=True` mencegah forward dan screenshot teks rahasia.
 
@@ -41,11 +44,12 @@
 aeternum-premiapp-bot/
 ├── bot/
 │   ├── handlers/          # Router perintah & alur chat
-│   │   ├── admin.py       # Panel manajemen produk, stok & kupon diskon
+│   │   ├── admin.py       # Panel manajemen produk, stok, kupon & broadcast
 │   │   ├── catalog.py     # Navigasi katalog & input kode promo
 │   │   ├── history.py     # Riwayat belanja pengguna
 │   │   ├── order.py       # Pembuatan invoice QRIS dinamis
-│   │   └── start.py       # Menu utama, panduan & referral dashboard
+│   │   ├── start.py       # Menu utama, panduan & referral dashboard
+│   │   └── wallet.py      # Top up deposit QRIS & bayar pakai saldo
 │   ├── keyboards/         # Inline keyboard builder (User & Admin UI)
 │   ├── middlewares/       # Anti-spam & filter otorisasi admin
 │   └── services/          # Fulfillment engine, referral reward & protect content

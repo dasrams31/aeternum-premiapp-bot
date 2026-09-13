@@ -21,8 +21,21 @@ def admin_main_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🎟️ Buat Kode Promo", callback_data="admin_add_promo"),
     )
     builder.row(
+        InlineKeyboardButton(text="📢 Broadcast Pesan", callback_data="admin_broadcast"),
         InlineKeyboardButton(text="📊 Laporan & Omset", callback_data="admin_reports"),
-        InlineKeyboardButton(text="🔙 Menu Pembeli", callback_data="back_to_main"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Keluar ke Menu Pembeli", callback_data="back_to_main")
+    )
+    return builder.as_markup()
+
+
+def confirm_broadcast_kb() -> InlineKeyboardMarkup:
+    """Konfirmasi Pengiriman Broadcast."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🚀 Kirim Broadcast Sekarang", callback_data="confirm_send_broadcast"),
+        InlineKeyboardButton(text="❌ Batalkan", callback_data="admin_dashboard"),
     )
     return builder.as_markup()
 
