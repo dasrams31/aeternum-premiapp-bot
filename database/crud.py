@@ -86,7 +86,13 @@ async def get_all_user_ids(session: AsyncSession) -> List[int]:
 async def add_user_balance(
     session: AsyncSession, user_id: int, amount: float
 ) -> Optional[User]:
-    user = await get_user_by_id(session, user_id)
+    stmt = (
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+    )
+    res = await session.execute(stmt)
+    user = res.scalar_one_or_none()
     if user:
         user.balance = float(user.balance or 0.0) + amount
         await session.commit()
@@ -117,7 +123,13 @@ async def deduct_user_balance_atomic(
 async def add_referral_commission(
     session: AsyncSession, referrer_id: int, commission_amount: float
 ) -> Optional[User]:
-    user = await get_user_by_id(session, referrer_id)
+    stmt = (
+        select(User)
+        .where(User.id == referrer_id)
+        .with_for_update()
+    )
+    res = await session.execute(stmt)
+    user = res.scalar_one_or_none()
     if user:
         user.referral_balance = float(user.referral_balance or 0.0) + commission_amount
         await session.commit()

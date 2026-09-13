@@ -23,6 +23,7 @@ from config import settings
 from database import crud
 from database.connection import async_session
 from database.models import Category, Product, PromoCode, Transaction, User
+from bot.services.auth import validate_telegram_init_data
 from bot.services.fulfillment import deliver_purchased_product
 from webhook.gateway import BayarGGGateway, TripayGateway, get_payment_gateway
 
@@ -205,7 +206,16 @@ class OrderCreateRequest(BaseModel):
 
 
 @app.post("/api/order/create")
-async def api_create_order(req: OrderCreateRequest):
+async def api_create_order(
+    req: OrderCreateRequest,
+    x_telegram_init_data: Optional[str] = Header(None),
+):
+    # Jika bayar pakai saldo, verifikasi keaslian Telegram WebApp initData
+    if req.payment_method == "BALANCE" and x_telegram_init_data:
+        is_valid_auth, auth_user = validate_telegram_init_data(x_telegram_init_data)
+        if is_valid_auth and auth_user and auth_user.get("id"):
+            req.user_id = int(auth_user["id"])
+
     async with async_session() as session:
         user = await crud.get_user_by_id(session=session, user_id=req.user_id)
         if not user:
