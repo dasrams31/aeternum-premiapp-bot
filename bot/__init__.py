@@ -1,0 +1,3 @@
+"""
+Aeternum PremiApp Bot Package
+"""
