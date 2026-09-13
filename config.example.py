@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     GATEWAY_PRIVATE_KEY: str = "YOUR_PRIVATE_KEY"
     GATEWAY_MERCHANT_CODE: str = "YOUR_MERCHANT_CODE"
     
+    # Security: IP Whitelisting
+    VERIFY_GATEWAY_IP: bool = False
+    GATEWAY_ALLOWED_IPS: str = "103.150.190.1,103.150.190.2"
+
     # Channel Testimoni
     TESTIMONIAL_CHANNEL_ID: Optional[str] = "@AeternumTesti"
 

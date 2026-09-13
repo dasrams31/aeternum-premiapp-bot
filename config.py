@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     GATEWAY_PRIVATE_KEY: str = os.getenv("GATEWAY_PRIVATE_KEY", "")
     GATEWAY_MERCHANT_CODE: str = os.getenv("GATEWAY_MERCHANT_CODE", "")
 
+    # Security: IP Whitelisting Webhook Gateway
+    VERIFY_GATEWAY_IP: bool = os.getenv("VERIFY_GATEWAY_IP", "False").lower() in ("true", "1", "yes")
+    # Daftar IP resmi gateway dipisahkan koma (Contoh: 103.150.190.1,103.150.190.2)
+    GATEWAY_ALLOWED_IPS: str = os.getenv("GATEWAY_ALLOWED_IPS", "")
+
     # Channel Testimoni (Username @channel atau ID)
     TESTIMONIAL_CHANNEL_ID: Optional[str] = os.getenv("TESTIMONIAL_CHANNEL_ID", None)
 

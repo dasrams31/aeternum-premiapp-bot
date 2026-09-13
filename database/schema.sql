@@ -1,5 +1,5 @@
 -- ============================================================
--- Aeternum PremiApp Bot - PostgreSQL Database Schema
+-- Aeternum PremiApp Bot - PostgreSQL Database Schema & Indexes
 -- ============================================================
 
 -- 1. Tabel Users
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS reviews (
     transaction_id VARCHAR(50) REFERENCES transactions(id) ON DELETE CASCADE UNIQUE NOT NULL,
     user_id BIGINT REFERENCES users(id) ON DELETE CASCADE NOT NULL,
     product_id INT REFERENCES products(id) ON DELETE CASCADE NOT NULL,
-    rating INT NOT NULL,                 -- 1 sampai 5
+    rating INT NOT NULL,
     comment TEXT,
     is_posted_to_channel BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -123,3 +123,12 @@ CREATE TABLE IF NOT EXISTS warranty_tickets (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     resolved_at TIMESTAMP WITH TIME ZONE
 );
+
+-- ============================================================
+-- PERFORMANCE & HIGH-CONCURRENCY INDEXES
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_products_cat_active ON products(category_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_product_items_stock ON product_items(product_id, is_sold);
+CREATE INDEX IF NOT EXISTS idx_transactions_user_status ON transactions(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_transactions_expired ON transactions(status, expired_at);
+CREATE INDEX IF NOT EXISTS idx_warranty_tickets_user ON warranty_tickets(user_id, status);
