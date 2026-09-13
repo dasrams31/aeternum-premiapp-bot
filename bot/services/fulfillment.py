@@ -30,6 +30,13 @@ async def deliver_purchased_product(
     user_id = transaction.user_id
     delivered_text = ""
 
+    # Hapus pesan invoice QRIS agar tidak menumpuk di chat pembeli
+    if transaction.telegram_message_id:
+        try:
+            await bot.delete_message(chat_id=user_id, message_id=transaction.telegram_message_id)
+        except Exception:
+            pass
+
     try:
         # ==========================================
         # 1. TIPE: TEXT_STOCK (Finalisasi Kunci Stok ke Terjual)

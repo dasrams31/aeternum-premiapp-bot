@@ -80,10 +80,7 @@ async def cb_show_category_products(
 
     products_with_stock = []
     for prod in products:
-        if prod.product_type == "TEXT_STOCK":
-            stock = await crud.count_available_stock(session=session, product_id=prod.id)
-        else:
-            stock = 999
+        stock = await crud.count_available_stock(session=session, product_id=prod.id)
         products_with_stock.append((prod, stock))
 
     text = (
@@ -117,15 +114,19 @@ async def cb_show_product_detail(
     user_balance = float(db_user.balance or 0.0) if db_user else 0.0
 
     is_available = True
-    stock_info = "⚡ <b>Pengiriman:</b> Instan 24/7 (Teks / File)"
+    stock_count = await crud.count_available_stock(session=session, product_id=product.id)
 
     if product.product_type == "TEXT_STOCK":
-        stock_count = await crud.count_available_stock(session=session, product_id=product.id)
         if stock_count > 0:
-            stock_info = f"🟢 <b>Stok Tersedia:</b> <code>{stock_count} Akun / Key</code>"
+            stock_info = f"🟢 <b>Jumlah Stok:</b> <code>{stock_count} Akun / Serial Key</code>"
         else:
-            stock_info = "🔴 <b>Stok Tersedia:</b> <i>Habis</i>"
+            stock_info = "🔴 <b>Jumlah Stok:</b> <i>Habis (Stok Kosong)</i>"
             is_available = False
+    else:
+        if stock_count > 0:
+            stock_info = f"🟢 <b>Jumlah Stok:</b> <code>{stock_count} Item</code> (Pengiriman Instan)"
+        else:
+            stock_info = "🟢 <b>Jumlah Stok:</b> <code>Tersedia (Ready Instan 24/7)</code>"
 
     formatted_price = f"Rp {product.price:,.0f}".replace(",", ".")
     formatted_balance = f"Rp {user_balance:,.0f}".replace(",", ".")

@@ -95,11 +95,11 @@ def products_kb(products_with_stock: List[tuple[Product, int]]) -> InlineKeyboar
     builder = InlineKeyboardBuilder()
     for prod, stock_count in products_with_stock:
         if prod.product_type == "TEXT_STOCK":
-            stock_badge = f"🟢 Sisa {stock_count}" if stock_count > 0 else "🔴 Habis"
+            stock_badge = f"🟢 Stok: {stock_count}" if stock_count > 0 else "🔴 Stok Habis"
         else:
-            stock_badge = "⚡ Instan"
+            stock_badge = f"🟢 Stok: {stock_count}" if stock_count > 0 else "⚡ Ready"
             
-        btn_text = f"{prod.name} | Rp {prod.price:,.0f} ({stock_badge})".replace(",", ".")
+        btn_text = f"{prod.name} | Rp {prod.price:,.0f} [{stock_badge}]".replace(",", ".")
         builder.row(
             InlineKeyboardButton(text=btn_text, callback_data=f"prod_{prod.id}")
         )

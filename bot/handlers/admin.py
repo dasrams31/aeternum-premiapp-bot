@@ -839,17 +839,17 @@ async def cb_confirm_delete_product(
 async def cb_start_add_stock(
     callback: CallbackQuery, state: FSMContext, session: AsyncSession
 ) -> None:
-    stmt = select(Product).where(Product.product_type == "TEXT_STOCK")
+    stmt = select(Product).order_by(Product.id.desc())
     res = await session.execute(stmt)
     products = list(res.scalars().all())
 
     if not products:
-        await callback.answer("Belum ada produk bertipe Akun / Stok Teks!", show_alert=True)
+        await callback.answer("Belum ada produk terdaftar! Tambahkan produk terlebih dahulu.", show_alert=True)
         return
 
     await state.set_state(AddStockState.waiting_for_product)
     text = "📦 <b>PILIH PRODUK UNTUK DITAMBAH STOKNYA:</b>"
-    if callback.message:
+    if isinstance(callback.message, Message):
         await callback.message.edit_text(
             text=text,
             reply_markup=select_product_for_stock_kb(products),
@@ -858,14 +858,19 @@ async def cb_start_add_stock(
     await callback.answer()
 
 
-@router.callback_query(AddStockState.waiting_for_product, F.data.startswith("adm_stock_"))
-async def cb_pick_stock_product(callback: CallbackQuery, state: FSMContext) -> None:
+@router.callback_query(F.data.startswith("adm_stock_"))
+async def cb_pick_stock_product(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    if not callback.data:
+        return
     product_id = int(callback.data.replace("adm_stock_", ""))
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+    prod_name = product.name if product else "Produk"
+
     await state.update_data(product_id=product_id)
     await state.set_state(AddStockState.waiting_for_items_text)
 
     text = (
-        "📥 <b>BULK INPUT STOK KREDENSIAL / LISENSI</b>\n\n"
+        f"📥 <b>INPUT STOK TEKS UNTUK: {prod_name.upper()}</b>\n\n"
         "Silakan paste kumpulan akun/serial key Anda di bawah ini.\n"
         "<b>Setiap 1 baris akan dihitung sebagai 1 stok unik</b>.\n\n"
         "<i>Contoh format yang dipaste:</i>\n"
@@ -873,7 +878,7 @@ async def cb_pick_stock_product(callback: CallbackQuery, state: FSMContext) -> N
         "user2@mail.com:pass456\n"
         "user3@mail.com:pass789</code>"
     )
-    if callback.message:
+    if isinstance(callback.message, Message):
         await callback.message.edit_text(
             text=text,
             reply_markup=cancel_admin_action_kb(),
@@ -886,7 +891,7 @@ async def cb_pick_stock_product(callback: CallbackQuery, state: FSMContext) -> N
 async def process_stock_paste(
     message: Message, state: FSMContext, session: AsyncSession, bot: Bot
 ) -> None:
-    lines = [line.strip() for line in message.text.split("\n") if line.strip()]
+    lines = [line.strip() for line in (message.text or "").split("\n") if line.strip()]
     if not lines:
         await message.answer("⚠️ Tidak ada teks yang terdeteksi. Silakan coba lagi.")
         return
@@ -894,10 +899,14 @@ async def process_stock_paste(
     data = await state.get_data()
     product_id = data["product_id"]
 
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+    if product and product.product_type != "TEXT_STOCK":
+        product.product_type = "TEXT_STOCK"
+        await session.commit()
+
     total_added = await crud.add_stock_items_bulk(
         session=session, product_id=product_id, contents=lines
     )
-    product = await crud.get_product_by_id(session=session, product_id=product_id)
     new_total = await crud.count_available_stock(session=session, product_id=product_id)
 
     # Trigger Restock Notifier Broadcast ke pembeli yang menunggu

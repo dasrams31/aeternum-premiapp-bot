@@ -72,6 +72,13 @@ async def start_auto_payment_poller(bot: Bot, interval_seconds: int = 6) -> None
                             await crud.add_user_balance(session=session, user_id=trx.user_id, amount=float(trx.amount))
                             await crud.mark_transaction_paid(session=session, transaction_id=trx.id, delivered_content=f"TOPUP:{trx.amount}")
 
+                            # Hapus pesan invoice QRIS top-up
+                            if trx.telegram_message_id:
+                                try:
+                                    await bot.delete_message(chat_id=trx.user_id, message_id=trx.telegram_message_id)
+                                except Exception:
+                                    pass
+
                             try:
                                 await bot.send_message(
                                     chat_id=trx.user_id,

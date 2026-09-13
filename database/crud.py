@@ -580,6 +580,7 @@ async def create_transaction(
     qris_image_url: Optional[str] = None,
     gateway_reference: Optional[str] = None,
     expired_at: Optional[datetime] = None,
+    telegram_message_id: Optional[int] = None,
 ) -> Transaction:
     trx = Transaction(
         id=invoice_id,
@@ -596,11 +597,26 @@ async def create_transaction(
         gateway_reference=gateway_reference,
         status="PENDING",
         expired_at=expired_at,
+        telegram_message_id=telegram_message_id,
     )
     session.add(trx)
     await session.commit()
     await session.refresh(trx)
     return trx
+
+
+async def update_transaction_message_id(
+    session: AsyncSession,
+    transaction_id: str,
+    message_id: int,
+) -> None:
+    stmt = (
+        update(Transaction)
+        .where(Transaction.id == transaction_id)
+        .values(telegram_message_id=message_id)
+    )
+    await session.execute(stmt)
+    await session.commit()
 
 
 async def get_transaction_by_id(

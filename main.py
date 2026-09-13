@@ -93,7 +93,7 @@ async def main() -> None:
     # b. Cleaner Invoice Kedaluwarsa
     # c. Subscription Reminders (H-3 & H-1)
     payment_poller_task = asyncio.create_task(start_auto_payment_poller(bot=bot, interval_seconds=6))
-    cleaner_task = asyncio.create_task(start_expired_invoice_cleaner(interval_seconds=120))
+    cleaner_task = asyncio.create_task(start_expired_invoice_cleaner(bot=bot, interval_seconds=15))
     subscription_task = asyncio.create_task(start_subscription_reminder_task(bot=bot, interval_seconds=1800))
 
     logger.info(f"FastAPI Webhook berjalan di port {settings.PORT}")

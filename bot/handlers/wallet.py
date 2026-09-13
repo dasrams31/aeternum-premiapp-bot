@@ -171,11 +171,16 @@ async def process_custom_amount(
     )
 
     qr_file = generate_qr_image(qris_payload)
-    await message.answer_photo(
+    sent_msg = await message.answer_photo(
         photo=qr_file,
         caption=caption,
         reply_markup=invoice_kb(invoice_id),
         parse_mode="HTML",
+    )
+    await crud.update_transaction_message_id(
+        session=session,
+        transaction_id=invoice_id,
+        message_id=sent_msg.message_id,
     )
 
 
@@ -228,11 +233,16 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
     qr_file = generate_qr_image(qris_payload)
     if callback.message:
         await callback.message.delete()
-        await callback.message.answer_photo(
+        sent_msg = await callback.message.answer_photo(
             photo=qr_file,
             caption=caption,
             reply_markup=invoice_kb(invoice_id),
             parse_mode="HTML",
+        )
+        await crud.update_transaction_message_id(
+            session=session,
+            transaction_id=invoice_id,
+            message_id=sent_msg.message_id,
         )
     await callback.answer()
 

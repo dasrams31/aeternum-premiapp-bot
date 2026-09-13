@@ -102,10 +102,9 @@ def select_discount_type_kb() -> InlineKeyboardMarkup:
 def select_product_for_stock_kb(products: list[Product]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for prod in products:
-        if prod.product_type == "TEXT_STOCK":
-            builder.row(
-                InlineKeyboardButton(text=f"📦 {prod.name}", callback_data=f"adm_stock_{prod.id}")
-            )
+        builder.row(
+            InlineKeyboardButton(text=f"📦 {prod.name}", callback_data=f"adm_stock_{prod.id}")
+        )
     builder.row(
         InlineKeyboardButton(text="🔙 Kembali ke Panel Admin", callback_data="admin_dashboard")
     )

@@ -215,6 +215,7 @@ class Transaction(Base):
     qris_string: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     qris_image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     gateway_reference: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    telegram_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     
     status: Mapped[str] = mapped_column(String(30), default="PENDING", index=True)
     delivered_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
