@@ -64,11 +64,11 @@ async def run_all_tests():
             is_admin=False,
         )
 
-        buyer_id = 999222000
+        buyer_id = int(datetime.utcnow().timestamp()) % 1000000000
         buyer_user, is_new_buyer = await crud.get_or_create_user(
             session=session,
             user_id=buyer_id,
-            username="test_buyer",
+            username=f"buyer_{buyer_id}",
             first_name="Test Buyer",
             is_admin=False,
             referrer_id=referrer_id,
@@ -153,9 +153,10 @@ async def run_all_tests():
 
         # 7. Test Promo Codes & Discount Engine
         print("\n[TEST 7] Testing Promo Code & Discount Engine...")
+        unique_code = f"DISC{int(datetime.utcnow().timestamp()) % 100000}"
         promo = await crud.create_promo_code(
             session=session,
-            code="AETERNUM10",
+            code=unique_code,
             discount_type="PERCENT",
             discount_value=10.0,  # 10%
             min_purchase=20000.0,
@@ -164,7 +165,7 @@ async def run_all_tests():
         )
         is_valid, msg, discount, p_obj = await crud.validate_and_apply_promo(
             session=session,
-            code_str="aeternum10",
+            code_str=unique_code,
             user_id=buyer_id,
             original_price=35000.0,
         )
@@ -207,7 +208,7 @@ async def run_all_tests():
 
         # 10. Test Review & Testimonial Creation
         print("\n[TEST 10] Testing Review & Testimonial Creation...")
-        test_invoice_id = "AP-20260913-TEST"
+        test_invoice_id = f"AP-{int(datetime.utcnow().timestamp())}-TEST"
         trx_test = await crud.create_transaction(
             session=session,
             invoice_id=test_invoice_id,
@@ -216,7 +217,7 @@ async def run_all_tests():
             amount=31500.0,
             original_amount=35000.0,
             discount_amount=3500.0,
-            promo_code="AETERNUM10",
+            promo_code=unique_code,
         )
         await crud.mark_transaction_paid(session=session, transaction_id=test_invoice_id, delivered_content="sample:creds")
 
@@ -236,7 +237,7 @@ async def run_all_tests():
 
         # 11. Test Warranty Ticket Lifecycle
         print("\n[TEST 11] Testing Warranty Ticket Claim & Admin Resolution...")
-        tkt_code = "TKT-20260913-9999"
+        tkt_code = f"TKT-{int(datetime.utcnow().timestamp())}-9999"
         ticket = await crud.create_warranty_ticket(
             session=session,
             ticket_code=tkt_code,
@@ -272,8 +273,7 @@ async def run_all_tests():
 
         # 13. Test Subscription Expiry Reminders (H-3 / H-1)
         print("\n[TEST 13] Testing Subscription Expiry Reminders...")
-        # Buat transaksi dengan expired 2 hari lagi (Trigger H-3)
-        h3_inv = "AP-SUB-H3-TEST"
+        h3_inv = f"AP-SUB-H3-{int(datetime.utcnow().timestamp())}"
         trx_h3 = await crud.create_transaction(
             session=session,
             invoice_id=h3_inv,
@@ -305,7 +305,7 @@ async def run_all_tests():
         assert res_health.status_code == 200, f"Health check failed: {res_health.status_code}"
 
         # Webhook Simulation: TopUp Transaction
-        topup_inv = "TOPUP-20260913-AUTO"
+        topup_inv = f"TOPUP-{int(datetime.utcnow().timestamp())}-AUTO"
         async with async_session() as session:
             await crud.create_transaction(
                 session=session,

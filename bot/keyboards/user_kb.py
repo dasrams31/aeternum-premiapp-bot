@@ -97,24 +97,31 @@ def product_detail_kb(
     current_price: float = 0.0,
     has_promo: bool = False,
 ) -> InlineKeyboardMarkup:
+    """
+    Tombol Aksi pada Halaman Detail Produk.
+    Selalu menampilkan opsi 'Bayar Pakai Saldo' dan 'Beli via QRIS' dengan jelas.
+    """
     builder = InlineKeyboardBuilder()
     price_to_pay = current_price or float(product.price)
 
     if is_available:
-        if user_balance >= price_to_pay:
-            builder.row(
-                InlineKeyboardButton(
-                    text=f"⚡ Bayar Pakai Saldo (Rp {user_balance:,.0f})".replace(",", "."),
-                    callback_data=f"pay_balance_{product.id}"
-                )
+        # Tombol 1: Bayar Pakai Saldo Internal
+        fmt_bal = f"Rp {user_balance:,.0f}".replace(",", ".")
+        builder.row(
+            InlineKeyboardButton(
+                text=f"💳 Bayar Pakai Saldo (Saldo: {fmt_bal})",
+                callback_data=f"pay_balance_{product.id}"
             )
+        )
         
+        # Tombol 2: Beli Langsung via QRIS
         builder.row(
             InlineKeyboardButton(
                 text="⚡ Beli Sekarang via QRIS",
                 callback_data=f"buy_{product.id}"
             )
         )
+
         if not has_promo:
             builder.row(
                 InlineKeyboardButton(
@@ -137,6 +144,21 @@ def product_detail_kb(
             callback_data=f"cat_{product.category_id}" if product.category_id else "user_catalog"
         ),
         InlineKeyboardButton(text="🏠 Menu Utama", callback_data="back_to_main"),
+    )
+    return builder.as_markup()
+
+
+def insufficient_balance_kb(product_id: int) -> InlineKeyboardMarkup:
+    """Tombol ketika saldo tidak cukup untuk checkout."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="➕ Top Up Saldo Sekarang", callback_data="wallet_topup")
+    )
+    builder.row(
+        InlineKeyboardButton(text="⚡ Beli Langsung via QRIS", callback_data=f"buy_{product_id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Kembali ke Detail Produk", callback_data=f"prod_{product_id}")
     )
     return builder.as_markup()
 

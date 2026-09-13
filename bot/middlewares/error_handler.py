@@ -1,13 +1,14 @@
 """
 Aeternum PremiApp Bot - Global Error Handling Middleware & Leak Prevention
 Menangkap semua exception tak terduga, menyembunyikan detail internal dari pengguna,
-dan mem-forward traceback lengkap langsung ke DM Admin Telegram.
+dan mem-forward traceback lengkap langsung ke DM Admin Telegram secara tahan gangguan jaringan.
 """
 
 import logging
 import traceback
 from typing import Any, Awaitable, Callable, Dict
 from aiogram import BaseMiddleware, Bot
+from aiogram.exceptions import TelegramAPIError, TelegramNetworkError, TelegramRetryAfter
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
 from config import settings
@@ -27,6 +28,10 @@ class GlobalErrorMiddleware(BaseMiddleware):
     ) -> Any:
         try:
             return await handler(event, data)
+        except (TelegramNetworkError, TelegramRetryAfter) as net_err:
+            # Gangguan jaringan sementara ke server Telegram (TCP reset / timeout)
+            logger.warning(f"⚠️ [NETWORK TRANSIENT GLITCH] Koneksi ke Telegram terputus sementara: {net_err}")
+            return None
         except Exception as exc:
             user_id = "Unknown"
             username = "-"
@@ -52,12 +57,13 @@ class GlobalErrorMiddleware(BaseMiddleware):
                 elif isinstance(event, CallbackQuery) and event.message:
                     await event.message.answer(user_friendly_msg, parse_mode="HTML")
                     await event.answer()
+            except TelegramAPIError:
+                pass
             except Exception:
                 pass
 
             # 2. Kirim Traceback Lengkap ke DM Admin
             try:
-                # Potong traceback jika terlalu panjang untuk batas pesan Telegram (4096 char)
                 tb_clipped = tb_str[-2500:] if len(tb_str) > 2500 else tb_str
                 admin_alert = (
                     f"🚨 <b>SYSTEM ERROR CRASH ALERT!</b>\n"

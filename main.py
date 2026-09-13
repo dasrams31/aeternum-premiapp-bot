@@ -11,6 +11,7 @@ import uvicorn
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -47,9 +48,13 @@ async def main() -> None:
     # 2. Inisialisasi Database Schema
     await init_db()
 
-    # 3. Inisialisasi Bot & Dispatcher
+    # 3. Inisialisasi AiohttpSession dengan timeout numerik float (60s)
+    session = AiohttpSession(timeout=60.0)
+
+    # 4. Inisialisasi Bot & Dispatcher
     bot = Bot(
         token=settings.BOT_TOKEN,
+        session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher(storage=MemoryStorage())
@@ -57,13 +62,13 @@ async def main() -> None:
     # Berikan instance bot ke webhook server untuk notifikasi pengiriman otomatis
     set_bot_instance(bot)
 
-    # 4. Daftarkan Middlewares (Global Error Handler, Throttling Anti-Spam & DB Session)
+    # 5. Daftarkan Middlewares (Global Error Handler, Throttling Anti-Spam & DB Session)
     dp.update.middleware(GlobalErrorMiddleware(bot=bot))
     dp.message.middleware(ThrottlingMiddleware(rate_limit=0.8))
     dp.callback_query.middleware(ThrottlingMiddleware(rate_limit=0.8))
     dp.update.middleware(DatabaseMiddleware())
 
-    # 5. Daftarkan Seluruh Routers
+    # 6. Daftarkan Seluruh Routers
     dp.include_router(start.router)
     dp.include_router(admin.router)
     dp.include_router(catalog.router)
@@ -73,7 +78,7 @@ async def main() -> None:
     dp.include_router(review.router)
     dp.include_router(warranty.router)
 
-    # 6. Konfigurasi Webhook Server (FastAPI + Uvicorn)
+    # 7. Konfigurasi Webhook Server (FastAPI + Uvicorn)
     config = uvicorn.Config(
         app=webhook_app,
         host="0.0.0.0",
@@ -83,14 +88,17 @@ async def main() -> None:
     )
     server = uvicorn.Server(config)
 
-    # 7. Mulai Background Tasks (Cleaner & Subscription Reminders)
+    # 8. Mulai Background Tasks (Cleaner & Subscription Reminders)
     cleaner_task = asyncio.create_task(start_expired_invoice_cleaner(interval_seconds=120))
     subscription_task = asyncio.create_task(start_subscription_reminder_task(bot=bot, interval_seconds=1800))
 
     logger.info(f"FastAPI Webhook berjalan di port {settings.PORT}")
     logger.info("Bot Telegram mulai mendengarkan event polling...")
 
-    await bot.delete_webhook(drop_pending_updates=True)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        logger.warning(f"Gagal drop pending updates: {e}")
 
     try:
         await asyncio.gather(

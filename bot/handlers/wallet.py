@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import crud
 from bot.keyboards.user_kb import (
     back_to_main_kb,
+    insufficient_balance_kb,
     invoice_kb,
     topup_presets_kb,
     wallet_menu_kb,
@@ -40,7 +41,6 @@ def generate_qr_image(payload: str) -> BufferedInputFile:
 
 @router.callback_query(F.data == "user_wallet")
 async def cb_show_wallet(callback: CallbackQuery, session: AsyncSession) -> None:
-    """Menampilkan ringkasan dompet saldo internal."""
     user = callback.from_user
     db_user = await crud.get_user_by_id(session=session, user_id=user.id)
     balance = float(db_user.balance or 0.0) if db_user else 0.0
@@ -69,7 +69,6 @@ async def cb_show_wallet(callback: CallbackQuery, session: AsyncSession) -> None
 
 @router.callback_query(F.data == "wallet_topup")
 async def cb_prompt_topup(callback: CallbackQuery) -> None:
-    """Pilihan nominal top-up saldo."""
     text = (
         "➕ <b>TOP UP SALDO VIA QRIS</b>\n\n"
         "Silakan pilih nominal saldo yang ingin Anda isi:"
@@ -85,14 +84,12 @@ async def cb_prompt_topup(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("topup_nom_"))
 async def cb_topup_preset(callback: CallbackQuery, session: AsyncSession) -> None:
-    """Membuat invoice QRIS untuk top up preset."""
     amount = float(callback.data.replace("topup_nom_", ""))
     await create_topup_invoice(callback=callback, session=session, amount=amount)
 
 
 @router.callback_query(F.data == "topup_custom")
 async def cb_topup_custom(callback: CallbackQuery, state: FSMContext) -> None:
-    """Meminta nominal custom."""
     await state.set_state(TopUpState.waiting_for_custom_amount)
     text = (
         "✏️ <b>NOMINAL TOP UP KUSTOM</b>\n\n"
@@ -206,7 +203,6 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
 async def cb_pay_with_balance(
     callback: CallbackQuery, session: AsyncSession, bot: Bot, state: FSMContext
 ) -> None:
-    """Membeli produk secara langsung menggunakan saldo internal."""
     user = callback.from_user
     product_id = int(callback.data.replace("pay_balance_", ""))
     product = await crud.get_product_by_id(session=session, product_id=product_id)
@@ -220,20 +216,46 @@ async def cb_pay_with_balance(
     promo_code = state_data.get("applied_promo_code")
     discount_amount = state_data.get("applied_discount", 0.0)
     final_amount = state_data.get("final_price", float(product.price))
-    await state.clear()
 
-    # Potong saldo secara atomic
+    db_user = await crud.get_user_by_id(session=session, user_id=user.id)
+    current_balance = float(db_user.balance or 0.0) if db_user else 0.0
+
+    # JIKA SALDO KURANG: Tampilkan layar bantuan topup / bayar QRIS
+    if current_balance < final_amount:
+        fmt_bal = f"Rp {current_balance:,.0f}".replace(",", ".")
+        fmt_price = f"Rp {final_amount:,.0f}".replace(",", ".")
+        fmt_shortage = f"Rp {final_amount - current_balance:,.0f}".replace(",", ".")
+
+        text_insufficient = (
+            f"⚠️ <b>SALDO BELANJA TIDAK MENCUKUPI</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📦 <b>Produk:</b> {product.name}\n"
+            f"💵 <b>Total Tagihan:</b> <code>{fmt_price}</code>\n"
+            f"💳 <b>Saldo Anda:</b> <code>{fmt_bal}</code>\n"
+            f"🔴 <b>Kekurangan:</b> <code>{fmt_shortage}</code>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Silakan <b>Top Up Saldo</b> terlebih dahulu atau langsung bayar via <b>QRIS</b> di bawah ini:"
+        )
+
+        if callback.message:
+            await callback.message.edit_text(
+                text=text_insufficient,
+                reply_markup=insufficient_balance_kb(product_id),
+                parse_mode="HTML",
+            )
+        await callback.answer("Saldo tidak mencukupi!", show_alert=False)
+        return
+
+    # JIKA SALDO CUKUP: Potong saldo secara atomic
     deducted = await crud.deduct_user_balance_atomic(
         session=session, user_id=user.id, amount=final_amount
     )
 
     if not deducted:
-        await callback.answer(
-            "Saldo tidak mencukupi untuk melakukan pembelian ini!", show_alert=True
-        )
+        await callback.answer("Gagal memotong saldo. Silakan coba kembali!", show_alert=True)
         return
 
-    # Buat transaksi langsung PAID
+    await state.clear()
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M")
     invoice_id = f"BAL-{timestamp}-{user.id % 10000:04d}"
 
@@ -250,7 +272,7 @@ async def cb_pay_with_balance(
         payment_method="BALANCE",
     )
 
-    # Kirim produk instan
+    # Kirim produk instan ke pembeli
     await deliver_purchased_product(
         bot=bot, session=session, transaction=trx, product=product
     )
