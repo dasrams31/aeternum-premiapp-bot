@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Aeternum PremiApp Web Store</title>
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        tg: {
+                            bg: 'var(--tg-theme-bg-color, #0f172a)',
+                            secondary: 'var(--tg-theme-secondary-bg-color, #1e293b)',
+                            text: 'var(--tg-theme-text-color, #f8fafc)',
+                            hint: 'var(--tg-theme-hint-color, #94a3b8)',
+                            link: 'var(--tg-theme-link-color, #38bdf8)',
+                            button: 'var(--tg-theme-button-color, #6366f1)',
+                            buttonText: 'var(--tg-theme-button-text-color, #ffffff)',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: var(--tg-theme-bg-color, #0b0f19);
+            color: var(--tg-theme-text-color, #f8fafc);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .glass {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+    </style>
+</head>
+<body class="min-h-screen pb-24 select-none">
+
+    <!-- HEADER & USER PROFILE -->
+    <header class="sticky top-0 z-30 glass px-4 py-3 border-b border-slate-800/80">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-600 to-cyan-400 flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-500/20">
+                    <span id="user-avatar-initial">A</span>
+                </div>
+                <div>
+                    <h1 class="text-sm font-bold text-slate-100 flex items-center gap-1">
+                        <span id="user-name">Pengguna</span>
+                        <span id="admin-badge" class="hidden text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">Owner</span>
+                    </h1>
+                    <p class="text-xs text-slate-400 flex items-center gap-1">
+                        <span>Saldo:</span>
+                        <span id="user-balance-display" class="font-semibold text-emerald-400">Rp 0</span>
+                    </p>
+                </div>
+            </div>
+            <button onclick="openTopUpModal()" class="px-3 py-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-xs font-semibold rounded-xl shadow-md flex items-center gap-1 active:scale-95 transition-transform">
+                <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+                <span>Top Up</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN CONTAINER -->
+    <main class="max-w-lg mx-auto px-4 py-4">
+
+        <!-- ==================================================== -->
+        <!-- TAB 1: KATALOG PRODUK -->
+        <!-- ==================================================== -->
+        <section id="tab-catalog" class="tab-content space-y-4">
+            <!-- Promo Banner -->
+            <div class="relative overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-900/60 via-purple-900/60 to-slate-900/80 p-4 border border-indigo-500/20 shadow-xl">
+                <div class="relative z-10">
+                    <span class="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-400/30">Aeternum Store</span>
+                    <h2 class="text-base font-extrabold text-white mt-1">Produk Digital & Akun Premium</h2>
+                    <p class="text-xs text-slate-300 mt-0.5">Pengiriman instan 1 detik otomatis 24/7 didukung @dasrams.</p>
+                </div>
+                <div class="absolute -right-6 -bottom-6 w-24 h-24 bg-indigo-500/20 rounded-full blur-xl"></div>
+            </div>
+
+            <!-- Category Pills (Horizontal Scroll) -->
+            <div id="category-pills" class="flex gap-2 overflow-x-auto hide-scrollbar py-1">
+                <button onclick="filterCategory('ALL')" class="cat-pill active whitespace-nowrap px-3.5 py-1.5 rounded-xl text-xs font-medium bg-indigo-600 text-white shadow-sm transition-all">
+                    Semua Produk
+                </button>
+            </div>
+
+            <!-- Product Grid -->
+            <div id="product-grid" class="grid grid-cols-2 gap-3">
+                <div class="col-span-2 text-center py-10 text-slate-500 text-xs">
+                    <i data-lucide="loader-2" class="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-400"></i>
+                    Memuat katalog produk...
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================================================== -->
+        <!-- TAB 2: DOMPET & SALDO -->
+        <!-- ==================================================== -->
+        <section id="tab-wallet" class="tab-content hidden space-y-4">
+            <div class="glass rounded-2xl p-5 text-center relative overflow-hidden">
+                <div class="w-12 h-12 bg-indigo-500/20 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                    <i data-lucide="wallet" class="w-6 h-6"></i>
+                </div>
+                <p class="text-xs text-slate-400">Total Saldo Belanja Anda</p>
+                <h2 id="wallet-balance-big" class="text-2xl font-black text-white mt-1">Rp 0</h2>
+                
+                <div class="mt-4 pt-4 border-t border-slate-700/50 flex justify-between items-center text-xs text-slate-300">
+                    <span>Komisi Afiliasi (5%):</span>
+                    <span id="wallet-referral-balance" class="font-bold text-amber-400">Rp 0</span>
+                </div>
+
+                <div class="mt-4 grid grid-cols-2 gap-2">
+                    <button onclick="openTopUpModal()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-1.5">
+                        <i data-lucide="qr-code" class="w-4 h-4"></i>
+                        <span>Isi Saldo QRIS</span>
+                    </button>
+                    <button onclick="withdrawReferral()" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl border border-slate-700 active:scale-95 transition-transform flex items-center justify-center gap-1.5">
+                        <i data-lucide="arrow-up-right" class="w-4 h-4"></i>
+                        <span>Tarik Komisi</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Referral Link Box -->
+            <div class="glass rounded-2xl p-4 space-y-2">
+                <h3 class="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                    <i data-lucide="users" class="w-4 h-4 text-cyan-400"></i>
+                    <span>Tautan Afiliasi Anda</span>
+                </h3>
+                <p class="text-[11px] text-slate-400">Dapatkan 5% komisi setiap kali teman Anda melakukan pembelian produk.</p>
+                <div class="flex gap-2 items-center bg-slate-900/80 p-2 rounded-xl border border-slate-800">
+                    <input id="ref-link-input" type="text" readonly class="bg-transparent text-xs text-slate-300 w-full outline-none font-mono" value="...">
+                    <button onclick="copyRefLink()" class="px-3 py-1 bg-indigo-600 text-white text-xs font-semibold rounded-lg shrink-0 active:scale-95">
+                        Salin
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================================================== -->
+        <!-- TAB 3: RIWAYAT PESANAN -->
+        <!-- ==================================================== -->
+        <section id="tab-history" class="tab-content hidden space-y-3">
+            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">Riwayat Transaksi</h2>
+            <div id="history-list" class="space-y-2">
+                <div class="text-center py-10 text-slate-500 text-xs">Memuat riwayat pesanan...</div>
+            </div>
+        </section>
+
+        <!-- ==================================================== -->
+        <!-- TAB 4: PANEL ADMIN (KHUSUS OWNER @dasrams) -->
+        <!-- ==================================================== -->
+        <section id="tab-admin" class="tab-content hidden space-y-4">
+            <div class="flex items-center justify-between">
+                <h2 class="text-sm font-extrabold text-amber-400 flex items-center gap-1.5">
+                    <i data-lucide="shield-check" class="w-4 h-4"></i>
+                    <span>Owner Dashboard (@dasrams)</span>
+                </h2>
+                <button onclick="downloadCSVReport()" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1 active:scale-95">
+                    <i data-lucide="download" class="w-3.5 h-3.5"></i>
+                    <span>Export CSV</span>
+                </button>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-2 gap-2.5">
+                <div class="glass p-3.5 rounded-2xl">
+                    <p class="text-[11px] text-slate-400">Total Omset Lunas</p>
+                    <h3 id="admin-stat-omset" class="text-base font-extrabold text-emerald-400 mt-0.5">Rp 0</h3>
+                </div>
+                <div class="glass p-3.5 rounded-2xl">
+                    <p class="text-[11px] text-slate-400">Transaksi Sukses</p>
+                    <h3 id="admin-stat-trx" class="text-base font-extrabold text-indigo-400 mt-0.5">0 Pesanan</h3>
+                </div>
+            </div>
+
+            <!-- Admin Action Cards -->
+            <div class="space-y-2">
+                <button onclick="openAddProductModal()" class="w-full glass p-3.5 rounded-2xl text-left flex items-center justify-between hover:border-indigo-500/50 transition-colors">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                            <i data-lucide="plus-square" class="w-4 h-4"></i>
+                        </div>
+                        <div>
+                            <h4 class="text-xs font-bold text-slate-100">Tambah Produk Baru</h4>
+                            <p class="text-[10px] text-slate-400">Buat produk akun, file, link atau teks</p>
+                        </div>
+                    </div>
+                    <i data-lucide="chevron-right" class="w-4 h-4 text-slate-500"></i>
+                </button>
+
+                <button onclick="openAddStockModal()" class="w-full glass p-3.5 rounded-2xl text-left flex items-center justify-between hover:border-purple-500/50 transition-colors">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
+                            <i data-lucide="layers" class="w-4 h-4"></i>
+                        </div>
+                        <div>
+                            <h4 class="text-xs font-bold text-slate-100">Bulk Input Stok Akun</h4>
+                            <p class="text-[10px] text-slate-400">Paste banyak kredensial (Auto-Encrypted)</p>
+                        </div>
+                    </div>
+                    <i data-lucide="chevron-right" class="w-4 h-4 text-slate-500"></i>
+                </button>
+
+                <button onclick="openAddPromoModal()" class="w-full glass p-3.5 rounded-2xl text-left flex items-center justify-between hover:border-amber-500/50 transition-colors">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                            <i data-lucide="ticket" class="w-4 h-4"></i>
+                        </div>
+                        <div>
+                            <h4 class="text-xs font-bold text-slate-100">Buat Kupon Promo</h4>
+                            <p class="text-[10px] text-slate-400">Diskon persen / nominal Rupiah</p>
+                        </div>
+                    </div>
+                    <i data-lucide="chevron-right" class="w-4 h-4 text-slate-500"></i>
+                </button>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ==================================================== -->
+    <!-- BOTTOM NAVIGATION BAR -->
+    <!-- ==================================================== -->
+    <nav class="fixed bottom-0 left-0 right-0 z-40 glass border-t border-slate-800 px-6 py-2">
+        <div class="max-w-lg mx-auto flex justify-around items-center">
+            <button onclick="switchTab('catalog')" id="nav-catalog" class="nav-btn active flex flex-col items-center text-indigo-400 transition-colors">
+                <i data-lucide="shopping-bag" class="w-5 h-5"></i>
+                <span class="text-[10px] font-semibold mt-1">Katalog</span>
+            </button>
+            <button onclick="switchTab('wallet')" id="nav-wallet" class="nav-btn flex flex-col items-center text-slate-400 hover:text-slate-200 transition-colors">
+                <i data-lucide="wallet" class="w-5 h-5"></i>
+                <span class="text-[10px] font-semibold mt-1">Dompet</span>
+            </button>
+            <button onclick="switchTab('history')" id="nav-history" class="nav-btn flex flex-col items-center text-slate-400 hover:text-slate-200 transition-colors">
+                <i data-lucide="clock" class="w-5 h-5"></i>
+                <span class="text-[10px] font-semibold mt-1">Riwayat</span>
+            </button>
+            <button onclick="switchTab('admin')" id="nav-admin" class="nav-btn hidden flex flex-col items-center text-amber-400/70 hover:text-amber-300 transition-colors">
+                <i data-lucide="shield" class="w-5 h-5"></i>
+                <span class="text-[10px] font-semibold mt-1">Admin</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- ==================================================== -->
+    <!-- MODALS -->
+    <!-- ==================================================== -->
+    
+    <!-- Modal Detail & Checkout Produk -->
+    <div id="product-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl w-full max-w-md p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-start">
+                <div>
+                    <span id="modal-category" class="text-[10px] font-bold text-indigo-400 uppercase bg-indigo-500/10 px-2 py-0.5 rounded">Category</span>
+                    <h3 id="modal-title" class="text-base font-extrabold text-white mt-1">Product Title</h3>
+                </div>
+                <button onclick="closeProductModal()" class="text-slate-400 hover:text-white p-1">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div class="space-y-2 text-xs text-slate-300">
+                <div class="flex justify-between py-1 border-b border-slate-800">
+                    <span class="text-slate-400">Harga:</span>
+                    <span id="modal-price" class="font-extrabold text-slate-100 text-sm">Rp 0</span>
+                </div>
+                <div class="flex justify-between py-1 border-b border-slate-800">
+                    <span class="text-slate-400">Stok Tersedia:</span>
+                    <span id="modal-stock" class="font-semibold text-emerald-400">Instan</span>
+                </div>
+                <div class="flex justify-between py-1 border-b border-slate-800">
+                    <span class="text-slate-400">Masa Aktif:</span>
+                    <span id="modal-duration" class="text-slate-200">30 Hari</span>
+                </div>
+            </div>
+
+            <div>
+                <h4 class="text-xs font-semibold text-slate-400 mb-1">Deskripsi & Ketentuan:</h4>
+                <p id="modal-desc" class="text-xs text-slate-300 bg-slate-800/60 p-3 rounded-xl leading-relaxed whitespace-pre-line">-</p>
+            </div>
+
+            <!-- Promo Input Box -->
+            <div class="space-y-1.5">
+                <label class="text-[11px] font-semibold text-slate-400">Punya Kode Diskon / Voucher?</label>
+                <div class="flex gap-2">
+                    <input id="promo-code-input" type="text" placeholder="Contoh: HEMAT10" class="bg-slate-800 text-xs text-white uppercase px-3 py-2 rounded-xl outline-none border border-slate-700 w-full focus:border-indigo-500">
+                    <button onclick="applyPromoCode()" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shrink-0">
+                        Pakai
+                    </button>
+                </div>
+                <p id="promo-applied-msg" class="text-[11px] text-emerald-400 hidden"></p>
+            </div>
+
+            <!-- Payment Action Buttons -->
+            <div class="space-y-2 pt-2">
+                <button id="btn-pay-balance" onclick="executeBuyWithBalance()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2">
+                    <i data-lucide="zap" class="w-4 h-4"></i>
+                    <span id="btn-pay-balance-label">Bayar Pakai Saldo (Instan 1 Detik)</span>
+                </button>
+                <button id="btn-pay-qris" onclick="executeBuyWithQRIS()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2">
+                    <i data-lucide="qr-code" class="w-4 h-4"></i>
+                    <span>Bayar via QRIS Dinamis</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal TopUp Saldo -->
+    <div id="topup-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-sm p-5 space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-sm font-bold text-white flex items-center gap-1.5">
+                    <i data-lucide="wallet" class="w-4 h-4 text-indigo-400"></i>
+                    <span>Isi Saldo Dompet</span>
+                </h3>
+                <button onclick="closeTopUpModal()" class="text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+
+            <p class="text-xs text-slate-400">Pilih nominal top up instan via QRIS:</p>
+            <div class="grid grid-cols-2 gap-2">
+                <button onclick="submitTopUp(10000)" class="py-2.5 bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white font-bold text-xs rounded-xl border border-slate-700 transition-colors">Rp 10.000</button>
+                <button onclick="submitTopUp(25000)" class="py-2.5 bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white font-bold text-xs rounded-xl border border-slate-700 transition-colors">Rp 25.000</button>
+                <button onclick="submitTopUp(50000)" class="py-2.5 bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white font-bold text-xs rounded-xl border border-slate-700 transition-colors">Rp 50.000</button>
+                <button onclick="submitTopUp(100000)" class="py-2.5 bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white font-bold text-xs rounded-xl border border-slate-700 transition-colors">Rp 100.000</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Telegram WebApp JS Script -->
+    <script src="/static/js/miniapp.js"></script>
+</body>
+</html>

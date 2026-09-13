@@ -1,16 +1,34 @@
 """
-Aeternum PremiApp Bot - Keyboard Antarmuka Pengguna (User UI)
+Aeternum PremiApp Bot - Keyboard Antarmuka Pengguna (User UI & MiniApp)
 """
 
 from typing import List
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from config import settings
 from database.models import Category, Product, Transaction
+
+
+def get_miniapp_url() -> str:
+    """Mendapatkan URL WebApp."""
+    base_url = settings.WEBHOOK_HOST
+    if not base_url.startswith("http"):
+        base_url = f"https://{base_url}"
+    return f"{base_url}/app"
 
 
 def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    
+    # Tombol Utama: Telegram Mini App (Web Store Modern)
+    builder.row(
+        InlineKeyboardButton(
+            text="🚀 Buka Web Store (MiniApp)",
+            web_app=WebAppInfo(url=get_miniapp_url())
+        )
+    )
+    
     builder.row(
         InlineKeyboardButton(text="🛍️ Katalog Produk", callback_data="user_catalog"),
         InlineKeyboardButton(text="💰 Dompet & Saldo", callback_data="user_wallet"),
@@ -97,15 +115,10 @@ def product_detail_kb(
     current_price: float = 0.0,
     has_promo: bool = False,
 ) -> InlineKeyboardMarkup:
-    """
-    Tombol Aksi pada Halaman Detail Produk.
-    Selalu menampilkan opsi 'Bayar Pakai Saldo' dan 'Beli via QRIS' dengan jelas.
-    """
     builder = InlineKeyboardBuilder()
     price_to_pay = current_price or float(product.price)
 
     if is_available:
-        # Tombol 1: Bayar Pakai Saldo Internal
         fmt_bal = f"Rp {user_balance:,.0f}".replace(",", ".")
         builder.row(
             InlineKeyboardButton(
@@ -113,15 +126,12 @@ def product_detail_kb(
                 callback_data=f"pay_balance_{product.id}"
             )
         )
-        
-        # Tombol 2: Beli Langsung via QRIS
         builder.row(
             InlineKeyboardButton(
                 text="⚡ Beli Sekarang via QRIS",
                 callback_data=f"buy_{product.id}"
             )
         )
-
         if not has_promo:
             builder.row(
                 InlineKeyboardButton(
@@ -130,7 +140,6 @@ def product_detail_kb(
                 )
             )
     else:
-        # Tombol Restock Notifier saat stok habis
         builder.row(
             InlineKeyboardButton(
                 text="🔔 Ingatkan Saya Saat Restock",
@@ -149,7 +158,6 @@ def product_detail_kb(
 
 
 def insufficient_balance_kb(product_id: int) -> InlineKeyboardMarkup:
-    """Tombol ketika saldo tidak cukup untuk checkout."""
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="➕ Top Up Saldo Sekarang", callback_data="wallet_topup")
