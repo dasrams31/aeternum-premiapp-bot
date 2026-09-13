@@ -1,6 +1,6 @@
 """
 Aeternum PremiApp Bot - Main Application Entrypoint
-Menjalankan Telegram Bot Polling & FastAPI Webhook Server secara asinkronus bersamaan.
+Menjalankan Telegram Bot Polling, FastAPI Webhook Server, dan Background Cleaner bersamaan.
 """
 
 import asyncio
@@ -15,6 +15,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config import settings
 from database.connection import init_db
 from bot.middlewares.db_session import DatabaseMiddleware
+from bot.middlewares.throttling import ThrottlingMiddleware
+from bot.services.cleaner import start_expired_invoice_cleaner
 from bot.handlers import (
     admin,
     catalog,
@@ -48,8 +50,12 @@ async def main() -> None:
     # Berikan instance bot ke webhook server untuk notifikasi pengiriman otomatis
     set_bot_instance(bot)
 
-    # 4. Daftarkan Middleware & Routers
+    # 4. Daftarkan Middlewares (Throttling Anti-Spam & DB Session)
+    dp.message.middleware(ThrottlingMiddleware(rate_limit=0.8))
+    dp.callback_query.middleware(ThrottlingMiddleware(rate_limit=0.8))
     dp.update.middleware(DatabaseMiddleware())
+
+    # 5. Daftarkan Seluruh Routers
     dp.include_router(start.router)
     dp.include_router(admin.router)
     dp.include_router(catalog.router)
@@ -59,7 +65,7 @@ async def main() -> None:
     dp.include_router(review.router)
     dp.include_router(warranty.router)
 
-    # 5. Konfigurasi Webhook Server (FastAPI + Uvicorn)
+    # 6. Konfigurasi Webhook Server (FastAPI + Uvicorn)
     config = uvicorn.Config(
         app=webhook_app,
         host="0.0.0.0",
@@ -69,7 +75,9 @@ async def main() -> None:
     )
     server = uvicorn.Server(config)
 
-    # 6. Jalankan Bot Polling & Webhook Server Bersamaan
+    # 7. Mulai Background Cleaner untuk Invoice Kedaluwarsa
+    cleaner_task = asyncio.create_task(start_expired_invoice_cleaner(interval_seconds=120))
+
     logger.info(f"FastAPI Webhook berjalan di port {settings.PORT}")
     logger.info("Bot Telegram mulai mendengarkan event polling...")
 
@@ -81,6 +89,7 @@ async def main() -> None:
             server.serve(),
         )
     finally:
+        cleaner_task.cancel()
         await bot.session.close()
 
 
