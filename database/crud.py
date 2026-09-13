@@ -3,15 +3,15 @@ Aeternum PremiApp Bot - Asynchronous Database CRUD Operations
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Category, Product, ProductItem, Transaction, User
+from .models import Category, Product, ProductItem, PromoCode, PromoUsage, Transaction, User
 
 
 # ==========================================
-# 1. USER OPERATIONS
+# 1. USER & REFERRAL OPERATIONS
 # ==========================================
 async def get_or_create_user(
     session: AsyncSession,
@@ -19,22 +19,37 @@ async def get_or_create_user(
     username: Optional[str] = None,
     first_name: Optional[str] = None,
     is_admin: bool = False,
-) -> User:
-    """Ambil user atau buat baru jika belum ada di database."""
+    referrer_id: Optional[int] = None,
+) -> Tuple[User, bool]:
+    """
+    Ambil user atau buat baru jika belum ada.
+    Mengembalikan (User, is_new_user).
+    """
     stmt = select(User).where(User.id == user_id)
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
 
     if not user:
+        # User baru: Hubungkan dengan pengundang jika valid
+        valid_referrer = None
+        if referrer_id and referrer_id != user_id:
+            ref_stmt = select(User).where(User.id == referrer_id)
+            ref_user = (await session.execute(ref_stmt)).scalar_one_or_none()
+            if ref_user:
+                valid_referrer = referrer_id
+                ref_user.total_referrals += 1
+
         user = User(
             id=user_id,
             username=username,
             first_name=first_name,
             is_admin=is_admin,
+            referred_by=valid_referrer,
         )
         session.add(user)
         await session.commit()
         await session.refresh(user)
+        return user, True
     else:
         # Update info jika username/name berubah
         updated = False
@@ -47,17 +62,140 @@ async def get_or_create_user(
         if updated:
             await session.commit()
             await session.refresh(user)
+        return user, False
 
+
+async def get_user_by_id(session: AsyncSession, user_id: int) -> Optional[User]:
+    stmt = select(User).where(User.id == user_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def add_referral_commission(
+    session: AsyncSession, referrer_id: int, commission_amount: float
+) -> Optional[User]:
+    """Menambahkan saldo komisi ke akun pengundang."""
+    user = await get_user_by_id(session, referrer_id)
+    if user:
+        user.referral_balance = float(user.referral_balance or 0.0) + commission_amount
+        await session.commit()
+        await session.refresh(user)
     return user
 
 
 # ==========================================
-# 2. CATEGORY OPERATIONS
+# 2. PROMO CODE & DISCOUNT OPERATIONS
+# ==========================================
+async def create_promo_code(
+    session: AsyncSession,
+    code: str,
+    discount_type: str,
+    discount_value: float,
+    min_purchase: float = 0.0,
+    max_discount: Optional[float] = None,
+    max_usage: int = 100,
+    expired_at: Optional[datetime] = None,
+) -> PromoCode:
+    """Menambahkan kode promo baru."""
+    promo = PromoCode(
+        code=code.strip().upper(),
+        discount_type=discount_type.upper(),
+        discount_value=discount_value,
+        min_purchase=min_purchase,
+        max_discount=max_discount,
+        max_usage=max_usage,
+        expired_at=expired_at,
+    )
+    session.add(promo)
+    await session.commit()
+    await session.refresh(promo)
+    return promo
+
+
+async def validate_and_apply_promo(
+    session: AsyncSession,
+    code_str: str,
+    user_id: int,
+    original_price: float,
+) -> Tuple[bool, str, float, Optional[PromoCode]]:
+    """
+    Validasi kode promo dan hitung nominal diskon.
+    Returns: (is_valid, message, discount_amount, promo_object)
+    """
+    code_clean = code_str.strip().upper()
+    stmt = select(PromoCode).where(PromoCode.code == code_clean)
+    result = await session.execute(stmt)
+    promo = result.scalar_one_or_none()
+
+    if not promo or not promo.is_active:
+        return False, "❌ Kode promo tidak ditemukan atau sudah tidak aktif.", 0.0, None
+
+    if promo.expired_at and promo.expired_at < datetime.utcnow():
+        return False, "❌ Masa berlaku kode promo ini telah berakhir.", 0.0, None
+
+    if promo.used_count >= promo.max_usage:
+        return False, "❌ Kuota penggunaan kode promo ini sudah habis.", 0.0, None
+
+    if original_price < float(promo.min_purchase):
+        return (
+            False,
+            f"❌ Minimal pembelian untuk promo ini adalah Rp {promo.min_purchase:,.0f}.".replace(",", "."),
+            0.0,
+            None,
+        )
+
+    # Cek apakah user sudah pernah memakai kode ini
+    usage_stmt = (
+        select(PromoUsage)
+        .where(PromoUsage.promo_id == promo.id)
+        .where(PromoUsage.user_id == user_id)
+    )
+    existing_usage = (await session.execute(usage_stmt)).scalar_one_or_none()
+    if existing_usage:
+        return False, "❌ Anda sudah pernah menggunakan kode promo ini sebelumnya.", 0.0, None
+
+    # Hitung nilai potongan
+    if promo.discount_type == "PERCENT":
+        discount = original_price * (float(promo.discount_value) / 100.0)
+        if promo.max_discount and discount > float(promo.max_discount):
+            discount = float(promo.max_discount)
+    else:  # FIXED
+        discount = float(promo.discount_value)
+        if discount > original_price:
+            discount = original_price
+
+    return True, f"✅ Kupon valid! Potongan diskon Rp {discount:,.0f}.".replace(",", "."), discount, promo
+
+
+async def record_promo_usage(
+    session: AsyncSession,
+    promo_id: int,
+    user_id: int,
+    transaction_id: str,
+    discount_amount: float,
+) -> None:
+    """Mencatat riwayat penggunaan promo dan menaikkan used_count."""
+    promo_stmt = select(PromoCode).where(PromoCode.id == promo_id)
+    promo = (await session.execute(promo_stmt)).scalar_one_or_none()
+    if promo:
+        promo.used_count += 1
+
+    usage = PromoUsage(
+        promo_id=promo_id,
+        user_id=user_id,
+        transaction_id=transaction_id,
+        discount_amount=discount_amount,
+    )
+    session.add(usage)
+    await session.commit()
+
+
+# ==========================================
+# 3. CATEGORY OPERATIONS
 # ==========================================
 async def get_categories(
     session: AsyncSession, only_active: bool = True
 ) -> List[Category]:
-    """Mengambil semua kategori."""
     stmt = select(Category)
     if only_active:
         stmt = stmt.where(Category.is_active.is_(True))
@@ -69,7 +207,6 @@ async def get_categories(
 async def create_category(
     session: AsyncSession, name: str, description: Optional[str] = None
 ) -> Category:
-    """Menambahkan kategori baru."""
     category = Category(name=name, description=description)
     session.add(category)
     await session.commit()
@@ -78,12 +215,11 @@ async def create_category(
 
 
 # ==========================================
-# 3. PRODUCT OPERATIONS
+# 4. PRODUCT OPERATIONS
 # ==========================================
 async def get_products_by_category(
     session: AsyncSession, category_id: int, only_active: bool = True
 ) -> List[Product]:
-    """Mengambil daftar produk berdasarkan ID kategori."""
     stmt = select(Product).where(Product.category_id == category_id)
     if only_active:
         stmt = stmt.where(Product.is_active.is_(True))
@@ -95,7 +231,6 @@ async def get_products_by_category(
 async def get_product_by_id(
     session: AsyncSession, product_id: int
 ) -> Optional[Product]:
-    """Mengambil detail 1 produk."""
     stmt = select(Product).where(Product.id == product_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
@@ -112,7 +247,6 @@ async def create_product(
     telegram_file_id: Optional[str] = None,
     vip_chat_id: Optional[int] = None,
 ) -> Product:
-    """Menambahkan produk baru ke database."""
     product = Product(
         category_id=category_id,
         name=name,
@@ -130,12 +264,11 @@ async def create_product(
 
 
 # ==========================================
-# 4. PRODUCT ITEM & STOCK OPERATIONS
+# 5. PRODUCT ITEM & STOCK OPERATIONS
 # ==========================================
 async def count_available_stock(
     session: AsyncSession, product_id: int
 ) -> int:
-    """Menghitung sisa stok yang belum terjual."""
     stmt = (
         select(func.count(ProductItem.id))
         .where(ProductItem.product_id == product_id)
@@ -148,7 +281,6 @@ async def count_available_stock(
 async def add_stock_items_bulk(
     session: AsyncSession, product_id: int, contents: List[str]
 ) -> int:
-    """Memasukkan banyak stok teks sekaligus."""
     items = [
         ProductItem(product_id=product_id, content=content.strip())
         for content in contents
@@ -164,11 +296,6 @@ async def add_stock_items_bulk(
 async def get_and_lock_available_item(
     session: AsyncSession, product_id: int, transaction_id: str
 ) -> Optional[ProductItem]:
-    """
-    Atomic Stock Delivery:
-    Mengambil 1 stok dan menguncinya dengan FOR UPDATE SKIP LOCKED
-    untuk mencegah race condition saat banyak pembeli bayar bersamaan.
-    """
     stmt = (
         select(ProductItem)
         .where(ProductItem.product_id == product_id)
@@ -190,7 +317,7 @@ async def get_and_lock_available_item(
 
 
 # ==========================================
-# 5. TRANSACTION OPERATIONS
+# 6. TRANSACTION OPERATIONS
 # ==========================================
 async def create_transaction(
     session: AsyncSession,
@@ -198,16 +325,21 @@ async def create_transaction(
     user_id: int,
     product_id: int,
     amount: float,
+    original_amount: float = 0.0,
+    discount_amount: float = 0.0,
+    promo_code: Optional[str] = None,
     qris_string: Optional[str] = None,
     qris_image_url: Optional[str] = None,
     gateway_reference: Optional[str] = None,
     expired_at: Optional[datetime] = None,
 ) -> Transaction:
-    """Membuat invoice transaksi baru dengan status PENDING."""
     trx = Transaction(
         id=invoice_id,
         user_id=user_id,
         product_id=product_id,
+        original_amount=original_amount or amount,
+        discount_amount=discount_amount,
+        promo_code=promo_code,
         amount=amount,
         qris_string=qris_string,
         qris_image_url=qris_image_url,
@@ -224,7 +356,6 @@ async def create_transaction(
 async def get_transaction_by_id(
     session: AsyncSession, transaction_id: str
 ) -> Optional[Transaction]:
-    """Mengambil transaksi berdasarkan ID Invoice."""
     stmt = select(Transaction).where(Transaction.id == transaction_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
@@ -235,7 +366,6 @@ async def mark_transaction_paid(
     transaction_id: str,
     delivered_content: Optional[str] = None,
 ) -> Optional[Transaction]:
-    """Memperbarui status transaksi menjadi PAID."""
     trx = await get_transaction_by_id(session, transaction_id)
     if trx:
         trx.status = "PAID"
@@ -250,7 +380,6 @@ async def mark_transaction_paid(
 async def get_user_transactions(
     session: AsyncSession, user_id: int, limit: int = 10
 ) -> List[Transaction]:
-    """Mengambil riwayat transaksi milik user."""
     stmt = (
         select(Transaction)
         .where(Transaction.user_id == user_id)

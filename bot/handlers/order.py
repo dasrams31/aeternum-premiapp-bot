@@ -7,6 +7,7 @@ import io
 import logging
 import qrcode
 from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +23,6 @@ def generate_qr_image(payload: str) -> BufferedInputFile:
     """Generate gambar QR Code dari string QRIS dinamis."""
     qr = qrcode.QRCode(
         version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
         box_size=10,
         border=2,
     )
@@ -37,7 +37,9 @@ def generate_qr_image(payload: str) -> BufferedInputFile:
 
 
 @router.callback_query(F.data.startswith("buy_"))
-async def cb_create_order(callback: CallbackQuery, session: AsyncSession) -> None:
+async def cb_create_order(
+    callback: CallbackQuery, session: AsyncSession, state: FSMContext
+) -> None:
     """Membuat pesanan baru dan menampilkan Invoice QRIS."""
     user = callback.from_user
     product_id = int(callback.data.split("_")[1])
@@ -54,13 +56,20 @@ async def cb_create_order(callback: CallbackQuery, session: AsyncSession) -> Non
             await callback.answer("Mohon maaf, stok baru saja habis!", show_alert=True)
             return
 
+    # Cek apakah ada promo yang diaplikasikan di state
+    state_data = await state.get_data()
+    promo_code = state_data.get("applied_promo_code")
+    discount_amount = state_data.get("applied_discount", 0.0)
+    final_amount = state_data.get("final_price", float(product.price))
+    await state.clear()
+
     # Buat ID Invoice Unik (Format: AP-YYYYMMDD-XXXX)
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M")
     invoice_id = f"AP-{timestamp}-{user.id % 10000:04d}"
     expired_at = datetime.utcnow() + timedelta(minutes=15)
 
-    # String payload QRIS (dapat diganti dengan response API Tripay/Midtrans)
-    mock_qris_string = f"00020101021226670016ID.CO.QRIS.WWW01189360000000000000000215{invoice_id}520458125303360540{int(product.price)}5802ID5914AETERNUM STORE6007JAKARTA6304"
+    # String payload QRIS
+    mock_qris_string = f"00020101021226670016ID.CO.QRIS.WWW01189360000000000000000215{invoice_id}520458125303360540{int(final_amount)}5802ID5914AETERNUM STORE6007JAKARTA6304"
 
     # Simpan transaksi ke database
     trx = await crud.create_transaction(
@@ -68,17 +77,23 @@ async def cb_create_order(callback: CallbackQuery, session: AsyncSession) -> Non
         invoice_id=invoice_id,
         user_id=user.id,
         product_id=product.id,
-        amount=product.price,
+        amount=final_amount,
+        original_amount=float(product.price),
+        discount_amount=discount_amount,
+        promo_code=promo_code,
         qris_string=mock_qris_string,
         expired_at=expired_at,
     )
 
-    formatted_price = f"Rp {product.price:,.0f}".replace(",", ".")
+    formatted_price = f"Rp {final_amount:,.0f}".replace(",", ".")
+    discount_info = f"\n✂️ <b>Diskon Promo ({promo_code}):</b> -Rp {discount_amount:,.0f}".replace(",", ".") if promo_code else ""
+
     caption_text = (
         f"🧾 <b>INVOICE PEMBAYARAN QRIS</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🆔 <b>No. Invoice:</b> <code>{invoice_id}</code>\n"
         f"📦 <b>Produk:</b> {product.name}\n"
+        f"💰 <b>Harga Normal:</b> Rp {product.price:,.0f}".replace(",", ".") + f"{discount_info}\n"
         f"💵 <b>Total Tagihan:</b> <code>{formatted_price}</code>\n"
         f"⏰ <b>Batas Waktu:</b> 15 Menit\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -92,7 +107,6 @@ async def cb_create_order(callback: CallbackQuery, session: AsyncSession) -> Non
     qr_file = generate_qr_image(mock_qris_string)
 
     if callback.message:
-        # Hapus pesan sebelumnya agar chat bersih
         await callback.message.delete()
         await callback.message.answer_photo(
             photo=qr_file,
@@ -119,7 +133,6 @@ async def cb_check_transaction(
         await callback.answer("✅ Pembayaran sudah terkonfirmasi!", show_alert=True)
         return
 
-    # Dalam mode produksi, panggil API Gateway untuk cek status live
     await callback.answer(
         "⏳ Pembayaran belum terdeteksi. Silakan selesaikan transfer lalu coba kembali dalam 10 detik.",
         show_alert=True,

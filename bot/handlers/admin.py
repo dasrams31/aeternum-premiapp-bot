@@ -1,6 +1,6 @@
 """
 Aeternum PremiApp Bot - Admin Management & FSM Handlers
-Panel khusus Admin untuk tambah produk, input stok akun massal, dan laporan.
+Panel khusus Admin untuk tambah produk, input stok akun massal, kupon diskon, dan laporan.
 """
 
 from aiogram import F, Router
@@ -13,11 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import crud
-from database.models import Category, Product, Transaction
+from database.models import Category, Product, PromoCode, Transaction
 from bot.keyboards.admin_kb import (
     admin_main_kb,
     cancel_admin_action_kb,
     select_category_kb,
+    select_discount_type_kb,
     select_product_for_stock_kb,
     select_product_type_kb,
 )
@@ -39,12 +40,19 @@ class AddProductState(StatesGroup):
     waiting_for_name = State()
     waiting_for_price = State()
     waiting_for_desc = State()
-    waiting_for_content = State()  # Text / File / VIP Chat ID
 
 
 class AddStockState(StatesGroup):
     waiting_for_product = State()
     waiting_for_items_text = State()
+
+
+class AddPromoState(StatesGroup):
+    waiting_for_code = State()
+    waiting_for_type = State()
+    waiting_for_value = State()
+    waiting_for_min_purchase = State()
+    waiting_for_max_usage = State()
 
 
 # Middleware filter hanya admin
@@ -91,7 +99,6 @@ async def show_admin_dashboard(
 @router.callback_query(F.data == "admin_create_category")
 @router.callback_query(F.data == "admin_manage_categories")
 async def cb_start_add_category(callback: CallbackQuery, state: FSMContext) -> None:
-    """Mulai proses tambah kategori baru."""
     await state.set_state(AddCategoryState.waiting_for_name)
     text = (
         "📁 <b>TAMBAH KATEGORI BARU</b>\n\n"
@@ -150,7 +157,6 @@ async def process_cat_desc(
 async def cb_start_add_product(
     callback: CallbackQuery, state: FSMContext, session: AsyncSession
 ) -> None:
-    """Langkah 1: Pilih Kategori."""
     categories = await crud.get_categories(session=session, only_active=True)
     if not categories:
         await callback.answer(
@@ -171,7 +177,6 @@ async def cb_start_add_product(
 
 @router.callback_query(AddProductState.waiting_for_category, F.data.startswith("adm_pcat_"))
 async def cb_pick_product_category(callback: CallbackQuery, state: FSMContext) -> None:
-    """Langkah 2: Pilih Tipe Produk."""
     cat_id = int(callback.data.replace("adm_pcat_", ""))
     await state.update_data(category_id=cat_id)
     await state.set_state(AddProductState.waiting_for_type)
@@ -194,7 +199,6 @@ async def cb_pick_product_category(callback: CallbackQuery, state: FSMContext) -
 
 @router.callback_query(AddProductState.waiting_for_type, F.data.startswith("type_"))
 async def cb_pick_product_type(callback: CallbackQuery, state: FSMContext) -> None:
-    """Langkah 3: Input Nama Produk."""
     p_type = callback.data.replace("type_", "")
     await state.update_data(product_type=p_type)
     await state.set_state(AddProductState.waiting_for_name)
@@ -215,7 +219,6 @@ async def cb_pick_product_type(callback: CallbackQuery, state: FSMContext) -> No
 
 @router.message(AddProductState.waiting_for_name)
 async def process_product_name(message: Message, state: FSMContext) -> None:
-    """Langkah 4: Input Harga Produk."""
     name = message.text.strip()
     await state.update_data(name=name)
     await state.set_state(AddProductState.waiting_for_price)
@@ -230,7 +233,6 @@ async def process_product_name(message: Message, state: FSMContext) -> None:
 
 @router.message(AddProductState.waiting_for_price)
 async def process_product_price(message: Message, state: FSMContext) -> None:
-    """Langkah 5: Input Deskripsi Produk."""
     try:
         price = float(message.text.strip().replace(".", "").replace(",", ""))
     except ValueError:
@@ -252,7 +254,6 @@ async def process_product_price(message: Message, state: FSMContext) -> None:
 async def process_product_desc(
     message: Message, state: FSMContext, session: AsyncSession
 ) -> None:
-    """Finalisasi Pembuatan Produk."""
     desc = message.text.strip()
     if desc == "-":
         desc = None
@@ -289,7 +290,6 @@ async def process_product_desc(
 async def cb_start_add_stock(
     callback: CallbackQuery, state: FSMContext, session: AsyncSession
 ) -> None:
-    """Pilih Produk untuk Pengisian Stok."""
     stmt = select(Product).where(Product.product_type == "TEXT_STOCK")
     res = await session.execute(stmt)
     products = list(res.scalars().all())
@@ -313,7 +313,6 @@ async def cb_start_add_stock(
 
 @router.callback_query(AddStockState.waiting_for_product, F.data.startswith("adm_stock_"))
 async def cb_pick_stock_product(callback: CallbackQuery, state: FSMContext) -> None:
-    """Menerima paste multi-line kredensial."""
     product_id = int(callback.data.replace("adm_stock_", ""))
     await state.update_data(product_id=product_id)
     await state.set_state(AddStockState.waiting_for_items_text)
@@ -340,7 +339,6 @@ async def cb_pick_stock_product(callback: CallbackQuery, state: FSMContext) -> N
 async def process_stock_paste(
     message: Message, state: FSMContext, session: AsyncSession
 ) -> None:
-    """Menyimpan seluruh baris teks ke database."""
     lines = [line.strip() for line in message.text.split("\n") if line.strip()]
     if not lines:
         await message.answer("⚠️ Tidak ada teks yang terdeteksi. Silakan coba lagi.")
@@ -367,19 +365,119 @@ async def process_stock_paste(
 
 
 # ==========================================
-# 4. LAPORAN OMSET & TRANSAKSI
+# 4. WIZARD BUAT KODE PROMO / VOUCHER
+# ==========================================
+@router.callback_query(F.data == "admin_add_promo")
+async def cb_start_add_promo(callback: CallbackQuery, state: FSMContext) -> None:
+    """Mulai wizard tambah kode voucher promo."""
+    await state.set_state(AddPromoState.waiting_for_code)
+    text = (
+        "🎟️ <b>LANGKAH 1/4: BUAT KODE PROMO BARU</b>\n\n"
+        "Silakan ketik nama kode promo/voucher yang ingin dibuat:\n"
+        "<i>(Contoh: HEMAT10, RAMADHAN2026, VIPDISKON)</i>"
+    )
+    if callback.message:
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=cancel_admin_action_kb(),
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.message(AddPromoState.waiting_for_code)
+async def process_promo_code_name(message: Message, state: FSMContext) -> None:
+    code = message.text.strip().upper()
+    await state.update_data(promo_code=code)
+    await state.set_state(AddPromoState.waiting_for_type)
+
+    await message.answer(
+        "📊 <b>LANGKAH 2/4: JENIS POTONGAN DISKON</b>\n\nPilih metode potongan diskon:",
+        reply_markup=select_discount_type_kb(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(AddPromoState.waiting_for_type, F.data.startswith("promo_type_"))
+async def cb_pick_discount_type(callback: CallbackQuery, state: FSMContext) -> None:
+    disc_type = callback.data.replace("promo_type_", "")
+    await state.update_data(discount_type=disc_type)
+    await state.set_state(AddPromoState.waiting_for_value)
+
+    example_text = "Masukkan angka persen (contoh: <code>15</code> untuk 15%):" if disc_type == "PERCENT" else "Masukkan nominal potongan Rupiah (contoh: <code>5000</code> untuk Rp 5.000):"
+    text = f"💵 <b>LANGKAH 3/4: BESARAN DISKON</b>\n\n{example_text}"
+
+    if callback.message:
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=cancel_admin_action_kb(),
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.message(AddPromoState.waiting_for_value)
+async def process_promo_value(message: Message, state: FSMContext) -> None:
+    try:
+        val = float(message.text.strip().replace(".", "").replace(",", ""))
+    except ValueError:
+        await message.answer("⚠️ Format angka salah! Masukkan hanya angka:")
+        return
+
+    await state.update_data(discount_value=val)
+    await state.set_state(AddPromoState.waiting_for_max_usage)
+
+    await message.answer(
+        "👥 <b>LANGKAH 4/4: KUOTA MAKSIMAL PENGGUNAAN</b>\n\n"
+        "Berapa kali kupon ini dapat digunakan secara keseluruhan?\n"
+        "<i>(Contoh: <code>50</code> untuk 50 transaksi pertama)</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AddPromoState.waiting_for_max_usage)
+async def process_promo_final(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    try:
+        max_usage = int(message.text.strip())
+    except ValueError:
+        max_usage = 100
+
+    data = await state.get_data()
+    promo = await crud.create_promo_code(
+        session=session,
+        code=data["promo_code"],
+        discount_type=data["discount_type"],
+        discount_value=data["discount_value"],
+        max_usage=max_usage,
+    )
+    await state.clear()
+
+    val_display = f"{promo.discount_value:.0f}%" if promo.discount_type == "PERCENT" else f"Rp {promo.discount_value:,.0f}".replace(",", ".")
+    await message.answer(
+        f"🎉 <b>KODE PROMO BERHASIL DIBUAT!</b>\n\n"
+        f"🏷️ <b>Kode:</b> <code>{promo.code}</code>\n"
+        f"✂️ <b>Potongan:</b> {val_display}\n"
+        f"👥 <b>Kuota:</b> {promo.max_usage} kali penggunaan\n\n"
+        f"<i>Pengguna sekarang dapat memasukkan kode ini saat checkout belanja.</i>",
+        reply_markup=admin_main_kb(),
+        parse_mode="HTML",
+    )
+
+
+# ==========================================
+# 5. LAPORAN OMSET & TRANSAKSI
 # ==========================================
 @router.message(Command("laporan"))
 @router.callback_query(F.data == "admin_reports")
 async def show_admin_reports(
     event: Message | CallbackQuery, session: AsyncSession
 ) -> None:
-    """Menampilkan rekap statistik penjualan toko."""
     user = event.from_user
     if not user or not is_admin_filter(user.id):
         return
 
-    # Hitung total transaksi sukses & omset
     stmt_sales = select(
         func.count(Transaction.id), func.sum(Transaction.amount)
     ).where(Transaction.status == "PAID")
@@ -389,7 +487,6 @@ async def show_admin_reports(
     total_trx = total_trx or 0
     total_omset = total_omset or 0.0
 
-    # Hitung total produk & kategori
     total_prods = (
         await session.execute(select(func.count(Product.id)))
     ).scalar_one()

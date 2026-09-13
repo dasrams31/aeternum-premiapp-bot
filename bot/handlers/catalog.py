@@ -3,7 +3,9 @@ Aeternum PremiApp Bot - Catalog & Product Browsing Handlers
 """
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import crud
@@ -15,6 +17,10 @@ from bot.keyboards.user_kb import (
 )
 
 router = Router(name="catalog_router")
+
+
+class ApplyPromoState(StatesGroup):
+    waiting_for_code = State()
 
 
 @router.callback_query(F.data == "user_catalog")
@@ -74,13 +80,12 @@ async def cb_show_category_products(
         await callback.answer()
         return
 
-    # Kumpulkan ketersediaan stok live untuk setiap produk
     products_with_stock = []
     for prod in products:
         if prod.product_type == "TEXT_STOCK":
             stock = await crud.count_available_stock(session=session, product_id=prod.id)
         else:
-            stock = 999  # Stok tak terbatas untuk file/link/teks statis
+            stock = 999
         products_with_stock.append((prod, stock))
 
     text = (
@@ -99,9 +104,10 @@ async def cb_show_category_products(
 
 @router.callback_query(F.data.startswith("prod_"))
 async def cb_show_product_detail(
-    callback: CallbackQuery, session: AsyncSession
+    callback: CallbackQuery, session: AsyncSession, state: FSMContext
 ) -> None:
     """Menampilkan detail produk, harga, deskripsi, dan tombol checkout."""
+    await state.clear()
     product_id = int(callback.data.split("_")[1])
     product = await crud.get_product_by_id(session=session, product_id=product_id)
 
@@ -109,7 +115,6 @@ async def cb_show_product_detail(
         await callback.answer("Produk tidak ditemukan!", show_alert=True)
         return
 
-    # Cek ketersediaan stok
     is_available = True
     stock_info = "⚡ <b>Pengiriman:</b> Instan 24/7 (Teks / File)"
 
@@ -144,9 +149,91 @@ async def cb_show_product_detail(
     await callback.answer()
 
 
+# ==========================================
+# APLIKASI KODE PROMO (VOUCHER)
+# ==========================================
+@router.callback_query(F.data.startswith("apply_promo_"))
+async def cb_prompt_promo(callback: CallbackQuery, state: FSMContext) -> None:
+    """Minta user mengetik kode promo."""
+    product_id = int(callback.data.replace("apply_promo_", ""))
+    await state.update_data(promo_product_id=product_id)
+    await state.set_state(ApplyPromoState.waiting_for_code)
+
+    text = (
+        "🎟️ <b>MASUKKAN KODE PROMO / VOUCHER</b>\n\n"
+        "Silakan ketik kode kupon promo Anda di bawah ini:\n"
+        "<i>(Contoh: HEMAT10, RAMADHAN, AETERNUM2026)</i>"
+    )
+    if callback.message:
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=back_to_main_kb(),
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.message(ApplyPromoState.waiting_for_code)
+async def process_promo_input(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    """Memproses input kode promo dan menampilkan harga diskon."""
+    code_input = message.text.strip()
+    data = await state.get_data()
+    product_id = data.get("promo_product_id")
+
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+    if not product:
+        await message.answer("Produk tidak ditemukan.", reply_markup=back_to_main_kb())
+        await state.clear()
+        return
+
+    is_valid, msg, discount_amount, promo = await crud.validate_and_apply_promo(
+        session=session,
+        code_str=code_input,
+        user_id=message.from_user.id,
+        original_price=float(product.price),
+    )
+
+    if not is_valid or not promo:
+        await message.answer(
+            f"{msg}\n\nSilakan coba kode lain atau kembali ke katalog:",
+            reply_markup=back_to_main_kb(),
+        )
+        return
+
+    final_price = float(product.price) - discount_amount
+    await state.update_data(
+        applied_promo_code=promo.code,
+        applied_discount=discount_amount,
+        final_price=final_price,
+    )
+
+    fmt_orig = f"Rp {product.price:,.0f}".replace(",", ".")
+    fmt_disc = f"Rp {discount_amount:,.0f}".replace(",", ".")
+    fmt_final = f"Rp {final_price:,.0f}".replace(",", ".")
+
+    text = (
+        f"🎉 <b>KODE PROMO BERHASIL DIGUNAKAN!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📦 <b>Produk:</b> {product.name}\n"
+        f"🏷️ <b>Kode Kupon:</b> <code>{promo.code}</code>\n"
+        f"💰 <b>Harga Awal:</b> <s>{fmt_orig}</s>\n"
+        f"✂️ <b>Potongan Diskon:</b> -{fmt_disc}\n"
+        f"💵 <b>Total Pembayaran:</b> <code>{fmt_final}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<i>Tekan tombol di bawah untuk melanjutkan ke pembayaran QRIS:</i>"
+    )
+
+    await message.answer(
+        text=text,
+        reply_markup=product_detail_kb(product, is_available=True, has_promo=True),
+        parse_mode="HTML",
+    )
+
+
 @router.callback_query(F.data == "stock_empty_alert")
 async def cb_stock_empty_alert(callback: CallbackQuery) -> None:
-    """Alert saat user klik tombol beli pada produk yang stoknya habis."""
     await callback.answer(
         "Mohon maaf, stok produk ini sedang kosong. Admin akan segera melakukan restock!",
         show_alert=True,

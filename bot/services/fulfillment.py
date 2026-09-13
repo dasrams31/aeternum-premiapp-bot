@@ -1,14 +1,15 @@
 """
-Aeternum PremiApp Bot - Automated Fulfillment Service
-Pengiriman produk instan dengan proteksi salin & format teks rapi.
+Aeternum PremiApp Bot - Automated Fulfillment & Commission Engine
+Pengiriman produk instan, pencatatan promo, dan reward komisi referral.
 """
 
 import logging
 from aiogram import Bot
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import crud
-from database.models import Product, Transaction
+from database.models import Product, PromoCode, Transaction, User
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,8 @@ async def deliver_purchased_product(
     product: Product,
 ) -> bool:
     """
-    Mengirimkan produk yang berhasil dibayar ke chat pembeli secara otomatis.
+    Mengirimkan produk yang berhasil dibayar ke chat pembeli secara otomatis,
+    mencatat promo, dan membagikan komisi referral.
     """
     user_id = transaction.user_id
     delivered_text = ""
@@ -124,7 +126,6 @@ async def deliver_purchased_product(
                 logger.error(f"VIP Chat ID kosong untuk produk #{product.id}")
                 return False
 
-            # Buat one-time invite link yang hanya bisa dipakai 1 orang
             invite_link = await bot.create_chat_invite_link(
                 chat_id=product.vip_chat_id,
                 member_limit=1,
@@ -148,6 +149,52 @@ async def deliver_purchased_product(
                 parse_mode="HTML",
                 protect_content=True,
             )
+
+        # ==========================================
+        # 5. CATAT PENGGUNAAN PROMO (JIKA ADA)
+        # ==========================================
+        if transaction.promo_code:
+            promo_res = await session.execute(
+                select(PromoCode).where(PromoCode.code == transaction.promo_code)
+            )
+            promo_obj = promo_res.scalar_one_or_none()
+            if promo_obj:
+                await crud.record_promo_usage(
+                    session=session,
+                    promo_id=promo_obj.id,
+                    user_id=user_id,
+                    transaction_id=transaction.id,
+                    discount_amount=float(transaction.discount_amount or 0.0),
+                )
+
+        # ==========================================
+        # 6. DISTRIBUSI KOMISI REFERRAL (5%)
+        # ==========================================
+        user_res = await session.execute(select(User).where(User.id == user_id))
+        buyer = user_res.scalar_one_or_none()
+
+        if buyer and buyer.referred_by:
+            commission = float(transaction.amount) * 0.05  # 5% komisi
+            if commission > 0:
+                await crud.add_referral_commission(
+                    session=session,
+                    referrer_id=buyer.referred_by,
+                    commission_amount=commission,
+                )
+                try:
+                    formatted_commission = f"Rp {commission:,.0f}".replace(",", ".")
+                    await bot.send_message(
+                        chat_id=buyer.referred_by,
+                        text=(
+                            f"💰 <b>KOMISI REFERRAL DITERIMA!</b>\n\n"
+                            f"Teman yang Anda undang baru saja membeli <b>{product.name}</b>.\n"
+                            f"➕ Saldo Komisi: <b>+{formatted_commission}</b>\n\n"
+                            f"<i>Cek total saldo komisi Anda di menu '👥 Program Afiliasi'.</i>"
+                        ),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
 
         # Catat status transaksi PAID & arsip konten terkirim
         await crud.mark_transaction_paid(

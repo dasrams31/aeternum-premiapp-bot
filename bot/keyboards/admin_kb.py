@@ -13,15 +13,16 @@ def admin_main_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     
     builder.row(
-        InlineKeyboardButton(text="➕ Tambah Produk Baru", callback_data="admin_add_product"),
+        InlineKeyboardButton(text="➕ Tambah Produk", callback_data="admin_add_product"),
         InlineKeyboardButton(text="📁 Kelola Kategori", callback_data="admin_manage_categories"),
     )
     builder.row(
-        InlineKeyboardButton(text="📦 Tambah Stok Akun/Teks", callback_data="admin_add_stock"),
-        InlineKeyboardButton(text="📊 Laporan & Omset", callback_data="admin_reports"),
+        InlineKeyboardButton(text="📦 Tambah Stok Teks", callback_data="admin_add_stock"),
+        InlineKeyboardButton(text="🎟️ Buat Kode Promo", callback_data="admin_add_promo"),
     )
     builder.row(
-        InlineKeyboardButton(text="🔙 Keluar ke Menu Pembeli", callback_data="back_to_main")
+        InlineKeyboardButton(text="📊 Laporan & Omset", callback_data="admin_reports"),
+        InlineKeyboardButton(text="🔙 Menu Pembeli", callback_data="back_to_main"),
     )
     return builder.as_markup()
 
@@ -57,6 +58,19 @@ def select_product_type_kb() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="🔗 Akses Channel/Grup VIP", callback_data="type_INVITE_LINK")
+    )
+    builder.row(
+        InlineKeyboardButton(text="❌ Batalkan", callback_data="admin_dashboard")
+    )
+    return builder.as_markup()
+
+
+def select_discount_type_kb() -> InlineKeyboardMarkup:
+    """Pilihan Jenis Diskon Kupon."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="📊 Persentase (%)", callback_data="promo_type_PERCENT"),
+        InlineKeyboardButton(text="💵 Potongan Tetap (Rp)", callback_data="promo_type_FIXED"),
     )
     builder.row(
         InlineKeyboardButton(text="❌ Batalkan", callback_data="admin_dashboard")
