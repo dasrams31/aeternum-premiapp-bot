@@ -1,7 +1,6 @@
 """
 Aeternum PremiApp Bot - Main Application Entrypoint
-Menjalankan Telegram Bot Polling, FastAPI Webhook Server, Invoice Janitor & Subscription Reminders.
-Dilengkapi Global Error Middleware, Throttling Anti-Spam, dan Database Session Injection.
+Menjalankan Telegram Bot Polling, FastAPI Webhook Server, Auto-Payment Poller, Cleaner & Subscription Reminders.
 """
 
 import asyncio
@@ -21,6 +20,7 @@ from bot.middlewares.db_session import DatabaseMiddleware
 from bot.middlewares.error_handler import GlobalErrorMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.services.cleaner import start_expired_invoice_cleaner
+from bot.services.payment_poller import start_auto_payment_poller
 from bot.services.subscription import start_subscription_reminder_task
 from bot.handlers import (
     admin,
@@ -48,7 +48,7 @@ async def main() -> None:
     # 2. Inisialisasi Database Schema
     await init_db()
 
-    # 3. Inisialisasi AiohttpSession dengan timeout numerik float (60s)
+    # 3. Inisialisasi AiohttpSession
     session = AiohttpSession(timeout=60.0)
 
     # 4. Inisialisasi Bot & Dispatcher
@@ -88,12 +88,17 @@ async def main() -> None:
     )
     server = uvicorn.Server(config)
 
-    # 8. Mulai Background Tasks (Cleaner & Subscription Reminders)
+    # 8. Mulai Background Tasks:
+    # a. Auto Payment Poller (Deteksi Bayar Otomatis per 6 Detik)
+    # b. Cleaner Invoice Kedaluwarsa
+    # c. Subscription Reminders (H-3 & H-1)
+    payment_poller_task = asyncio.create_task(start_auto_payment_poller(bot=bot, interval_seconds=6))
     cleaner_task = asyncio.create_task(start_expired_invoice_cleaner(interval_seconds=120))
     subscription_task = asyncio.create_task(start_subscription_reminder_task(bot=bot, interval_seconds=1800))
 
     logger.info(f"FastAPI Webhook berjalan di port {settings.PORT}")
     logger.info("Bot Telegram mulai mendengarkan event polling...")
+    logger.info("Auto-Payment Poller aktif berjalan di background.")
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
@@ -106,6 +111,7 @@ async def main() -> None:
             server.serve(),
         )
     finally:
+        payment_poller_task.cancel()
         cleaner_task.cancel()
         subscription_task.cancel()
         await bot.session.close()
