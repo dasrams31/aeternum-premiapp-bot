@@ -51,6 +51,9 @@ class User(Base):
     tickets: Mapped[List["WarrantyTicket"]] = relationship(
         "WarrantyTicket", back_populates="user", cascade="all, delete-orphan"
     )
+    restock_alerts: Mapped[List["RestockNotification"]] = relationship(
+        "RestockNotification", back_populates="user", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<User id={self.id} username='{self.username}' balance={self.balance}>"
@@ -89,6 +92,9 @@ class Product(Base):
     # Types: 'TEXT_STOCK', 'TEXT_STATIC', 'FILE', 'INVITE_LINK'
     product_type: Mapped[str] = mapped_column(String(50), nullable=False)
     
+    # Durasi langganan dalam hari (misal 30 hari untuk Netflix 1 Bulan)
+    duration_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=30)
+
     # Delivery content attributes
     text_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     telegram_file_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -108,6 +114,9 @@ class Product(Base):
     transactions: Mapped[List["Transaction"]] = relationship(
         "Transaction", back_populates="product"
     )
+    restock_alerts: Mapped[List["RestockNotification"]] = relationship(
+        "RestockNotification", back_populates="product", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Product id={self.id} name='{self.name}' price={self.price}>"
@@ -122,14 +131,12 @@ class ProductItem(Base):
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     
-    # Status Penjualan Permanen
     is_sold: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     sold_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     transaction_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     
-    # Sistem Kunci / Reservasi Stok Sementara
     reserved_by_trx: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
     reserved_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
@@ -138,9 +145,6 @@ class ProductItem(Base):
     )
 
     product: Mapped["Product"] = relationship("Product", back_populates="items")
-
-    def __repr__(self) -> str:
-        return f"<ProductItem id={self.id} product_id={self.product_id} is_sold={self.is_sold} reserved_by={self.reserved_by_trx}>"
 
 
 class PromoCode(Base):
@@ -210,6 +214,11 @@ class Transaction(Base):
     status: Mapped[str] = mapped_column(String(30), default="PENDING", index=True)
     delivered_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
+    # Pengingat Masa Aktif Langganan (Subscription Reminders)
+    expires_service_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    reminder_h3_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    reminder_h1_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -224,9 +233,6 @@ class Transaction(Base):
     product: Mapped[Optional["Product"]] = relationship("Product", back_populates="transactions")
     review: Mapped[Optional["Review"]] = relationship("Review", back_populates="transaction", uselist=False)
     tickets: Mapped[List["WarrantyTicket"]] = relationship("WarrantyTicket", back_populates="transaction")
-
-    def __repr__(self) -> str:
-        return f"<Transaction id='{self.id}' type='{self.trx_type}' amount={self.amount} status='{self.status}'>"
 
 
 class Review(Base):
@@ -283,3 +289,23 @@ class WarrantyTicket(Base):
 
     transaction: Mapped["Transaction"] = relationship("Transaction", back_populates="tickets")
     user: Mapped["User"] = relationship("User", back_populates="tickets")
+
+
+class RestockNotification(Base):
+    __tablename__ = "restock_notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    is_notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    product: Mapped["Product"] = relationship("Product", back_populates="restock_alerts")
+    user: Mapped["User"] = relationship("User", back_populates="restock_alerts")

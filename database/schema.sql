@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS products (
     description TEXT,
     price NUMERIC(12, 2) NOT NULL,
     product_type VARCHAR(50) NOT NULL, -- 'TEXT_STOCK', 'TEXT_STATIC', 'FILE', 'INVITE_LINK'
+    duration_days INT DEFAULT 30,      -- Durasi masa aktif langganan (hari)
     text_content TEXT,
     telegram_file_id TEXT,
     vip_chat_id BIGINT,
@@ -39,7 +40,7 @@ CREATE TABLE IF NOT EXISTS products (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 4. Tabel Stok Teks / Lisensi Unik (Dengan Sistem Reservasi Kunci Sementara)
+-- 4. Tabel Stok Teks / Lisensi Unik
 CREATE TABLE IF NOT EXISTS product_items (
     id SERIAL PRIMARY KEY,
     product_id INT REFERENCES products(id) ON DELETE CASCADE,
@@ -93,6 +94,9 @@ CREATE TABLE IF NOT EXISTS transactions (
     gateway_reference VARCHAR(100),
     status VARCHAR(30) DEFAULT 'PENDING',-- PENDING, PAID, EXPIRED, FAILED
     delivered_content TEXT,
+    expires_service_at TIMESTAMP WITH TIME ZONE, -- Waktu kedaluwarsa masa aktif akun
+    reminder_h3_sent BOOLEAN DEFAULT FALSE,
+    reminder_h1_sent BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     paid_at TIMESTAMP WITH TIME ZONE,
     expired_at TIMESTAMP WITH TIME ZONE
@@ -126,6 +130,16 @@ CREATE TABLE IF NOT EXISTS warranty_tickets (
     resolved_at TIMESTAMP WITH TIME ZONE
 );
 
+-- 10. Tabel Pengingat Restock Produk
+CREATE TABLE IF NOT EXISTS restock_notifications (
+    id SERIAL PRIMARY KEY,
+    product_id INT REFERENCES products(id) ON DELETE CASCADE NOT NULL,
+    user_id BIGINT REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    is_notified BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    notified_at TIMESTAMP WITH TIME ZONE
+);
+
 -- ============================================================
 -- PERFORMANCE & HIGH-CONCURRENCY INDEXES
 -- ============================================================
@@ -134,4 +148,5 @@ CREATE INDEX IF NOT EXISTS idx_product_items_stock ON product_items(product_id, 
 CREATE INDEX IF NOT EXISTS idx_product_items_reservation ON product_items(product_id, is_sold, reserved_until);
 CREATE INDEX IF NOT EXISTS idx_transactions_user_status ON transactions(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_transactions_expired ON transactions(status, expired_at);
-CREATE INDEX IF NOT EXISTS idx_warranty_tickets_user ON warranty_tickets(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_transactions_service_exp ON transactions(status, expires_service_at);
+CREATE INDEX IF NOT EXISTS idx_restock_alerts ON restock_notifications(product_id, is_notified);

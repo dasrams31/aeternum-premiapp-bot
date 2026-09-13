@@ -123,10 +123,11 @@ def product_detail_kb(
                 )
             )
     else:
+        # Tombol Restock Notifier saat stok habis
         builder.row(
             InlineKeyboardButton(
-                text="🚫 Stok Sedang Habis",
-                callback_data="stock_empty_alert"
+                text="🔔 Ingatkan Saya Saat Restock",
+                callback_data=f"restock_alert_{product.id}"
             )
         )
         
@@ -153,7 +154,6 @@ def invoice_kb(invoice_id: str) -> InlineKeyboardMarkup:
 
 
 def review_prompt_kb(invoice_id: str) -> InlineKeyboardMarkup:
-    """Keyboard rating bintang 1-5 setelah produk berhasil dikirim."""
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="⭐⭐⭐⭐⭐", callback_data=f"rate_5_{invoice_id}"),
@@ -168,7 +168,6 @@ def review_prompt_kb(invoice_id: str) -> InlineKeyboardMarkup:
 
 
 def history_detail_kb(invoice_id: str, is_paid: bool) -> InlineKeyboardMarkup:
-    """Tombol pada detail riwayat transaksi lampau."""
     builder = InlineKeyboardBuilder()
     if is_paid:
         builder.row(

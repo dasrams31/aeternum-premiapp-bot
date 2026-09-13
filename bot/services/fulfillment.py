@@ -1,8 +1,9 @@
 """
 Aeternum PremiApp Bot - Automated Fulfillment & Commission Engine
-Pengiriman produk instan, finalisasi stok terjual permanen, pembagian komisi & review.
+Pengiriman produk instan, finalisasi stok terjual permanen, masa aktif langganan, komisi & review.
 """
 
+from datetime import datetime, timedelta
 import logging
 from aiogram import Bot
 from sqlalchemy import select
@@ -23,7 +24,8 @@ async def deliver_purchased_product(
 ) -> bool:
     """
     Mengirimkan produk yang berhasil dibayar ke chat pembeli secara otomatis,
-    mengubah stok reserved menjadi TERJUAL PERMANEN, mencatat promo, dan membagikan komisi.
+    mengubah stok reserved menjadi TERJUAL PERMANEN, mencatat masa aktif langganan,
+    mencatat promo, dan membagikan komisi.
     """
     user_id = transaction.user_id
     delivered_text = ""
@@ -152,7 +154,14 @@ async def deliver_purchased_product(
             )
 
         # ==========================================
-        # 5. CATAT PENGGUNAAN PROMO
+        # 5. HITUNG MASA AKTIF LANGGANAN
+        # ==========================================
+        expires_service_at = None
+        if product.duration_days and product.duration_days > 0:
+            expires_service_at = datetime.utcnow() + timedelta(days=product.duration_days)
+
+        # ==========================================
+        # 6. CATAT PENGGUNAAN PROMO
         # ==========================================
         if transaction.promo_code:
             promo_res = await session.execute(
@@ -169,7 +178,7 @@ async def deliver_purchased_product(
                 )
 
         # ==========================================
-        # 6. DISTRIBUSI KOMISI REFERRAL (5%)
+        # 7. DISTRIBUSI KOMISI REFERRAL (5%)
         # ==========================================
         user_res = await session.execute(select(User).where(User.id == user_id))
         buyer = user_res.scalar_one_or_none()
@@ -198,7 +207,7 @@ async def deliver_purchased_product(
                     pass
 
         # ==========================================
-        # 7. KIRIM PROMPT RATING & ULASAN
+        # 8. KIRIM PROMPT RATING & ULASAN
         # ==========================================
         try:
             review_prompt_text = (
@@ -215,11 +224,12 @@ async def deliver_purchased_product(
         except Exception:
             pass
 
-        # Catat status transaksi PAID & arsip konten terkirim
+        # Catat status transaksi PAID, arsip konten terkirim & masa aktif langganan
         await crud.mark_transaction_paid(
             session=session,
             transaction_id=transaction.id,
             delivered_content=delivered_text,
+            expires_service_at=expires_service_at,
         )
         return True
 

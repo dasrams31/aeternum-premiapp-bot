@@ -13,6 +13,7 @@ from .models import (
     ProductItem,
     PromoCode,
     PromoUsage,
+    RestockNotification,
     Review,
     Transaction,
     User,
@@ -274,6 +275,7 @@ async def create_product(
     name: str,
     price: float,
     product_type: str,
+    duration_days: int = 30,
     description: Optional[str] = None,
     text_content: Optional[str] = None,
     telegram_file_id: Optional[str] = None,
@@ -284,6 +286,7 @@ async def create_product(
         name=name,
         price=price,
         product_type=product_type,
+        duration_days=duration_days,
         description=description,
         text_content=text_content,
         telegram_file_id=telegram_file_id,
@@ -296,14 +299,11 @@ async def create_product(
 
 
 # ==========================================
-# 5. PRODUCT ITEM & TEMPORARY STOCK RESERVATION (LOCK)
+# 5. PRODUCT ITEM & TEMPORARY STOCK RESERVATION
 # ==========================================
 async def count_available_stock(
     session: AsyncSession, product_id: int
 ) -> int:
-    """
-    Menghitung stok riil yang tersedia (belum terjual dan tidak sedang dikunci reservasi orang lain).
-    """
     now = datetime.utcnow()
     stmt = (
         select(func.count(ProductItem.id))
@@ -338,10 +338,6 @@ async def add_stock_items_bulk(
 async def reserve_stock_item_atomic(
     session: AsyncSession, product_id: int, transaction_id: str, duration_minutes: int = 15
 ) -> Optional[ProductItem]:
-    """
-    Mengunci 1 stok sementara saat user checkout (Status PENDING).
-    Stok otomatis berkurang dari display dan pembeli lain tidak bisa mengambilnya.
-    """
     now = datetime.utcnow()
     stmt = (
         select(ProductItem)
@@ -371,9 +367,6 @@ async def reserve_stock_item_atomic(
 async def release_reserved_stock(
     session: AsyncSession, transaction_id: str
 ) -> bool:
-    """
-    Mengembalikan stok ke status tersedia jika pembeli MEMBATALKAN pesanan atau invoice kedaluwarsa.
-    """
     stmt = (
         update(ProductItem)
         .where(ProductItem.reserved_by_trx == transaction_id)
@@ -388,10 +381,6 @@ async def release_reserved_stock(
 async def finalize_reserved_stock(
     session: AsyncSession, product_id: int, transaction_id: str
 ) -> Optional[ProductItem]:
-    """
-    Mengubah status reservasi sementara menjadi TERJUAL PERMANEN (is_sold = True) saat pembayaran sukses.
-    """
-    # 1. Cari item yang sudah dikunci oleh transaksi ini
     stmt = (
         select(ProductItem)
         .where(ProductItem.reserved_by_trx == transaction_id)
@@ -402,7 +391,6 @@ async def finalize_reserved_stock(
     res = await session.execute(stmt)
     item = res.scalar_one_or_none()
 
-    # 2. Jika tidak ada yang dikunci (misal tipe produk lain atau fallback), ambil item available baru
     if not item:
         now = datetime.utcnow()
         stmt_fallback = (
@@ -434,9 +422,6 @@ async def finalize_reserved_stock(
 
 
 async def release_all_expired_reservations(session: AsyncSession) -> int:
-    """
-    Background Janitor: Mengembalikan semua stok yang masa kuncinya sudah lewat 15 menit.
-    """
     now = datetime.utcnow()
     stmt = (
         update(ProductItem)
@@ -451,7 +436,55 @@ async def release_all_expired_reservations(session: AsyncSession) -> int:
 
 
 # ==========================================
-# 6. TRANSACTION OPERATIONS
+# 6. RESTOCK NOTIFICATION OPERATIONS
+# ==========================================
+async def subscribe_restock_alert(
+    session: AsyncSession, product_id: int, user_id: int
+) -> Tuple[bool, str]:
+    """Mendaftarkan pengguna ke antrian pengingat restock."""
+    stmt = (
+        select(RestockNotification)
+        .where(RestockNotification.product_id == product_id)
+        .where(RestockNotification.user_id == user_id)
+        .where(RestockNotification.is_notified.is_(False))
+    )
+    existing = (await session.execute(stmt)).scalar_one_or_none()
+    if existing:
+        return False, "Anda sudah terdaftar dalam antrian pengingat restock produk ini!"
+
+    alert = RestockNotification(product_id=product_id, user_id=user_id)
+    session.add(alert)
+    await session.commit()
+    return True, "✅ Berhasil! Bot akan mengirimkan pesan saat produk ini sudah restock."
+
+
+async def get_and_clear_restock_subscribers(
+    session: AsyncSession, product_id: int
+) -> List[int]:
+    """Mengambil seluruh user_id yang menunggu dan menandainya sebagai sudah dinotifikasi."""
+    stmt = (
+        select(RestockNotification)
+        .where(RestockNotification.product_id == product_id)
+        .where(RestockNotification.is_notified.is_(False))
+    )
+    res = await session.execute(stmt)
+    alerts = list(res.scalars().all())
+
+    user_ids = []
+    now = datetime.utcnow()
+    for al in alerts:
+        user_ids.append(al.user_id)
+        al.is_notified = True
+        al.notified_at = now
+
+    if alerts:
+        await session.commit()
+
+    return user_ids
+
+
+# ==========================================
+# 7. TRANSACTION OPERATIONS & EXPORT
 # ==========================================
 async def create_transaction(
     session: AsyncSession,
@@ -503,6 +536,7 @@ async def mark_transaction_paid(
     session: AsyncSession,
     transaction_id: str,
     delivered_content: Optional[str] = None,
+    expires_service_at: Optional[datetime] = None,
 ) -> Optional[Transaction]:
     trx = await get_transaction_by_id(session, transaction_id)
     if trx:
@@ -510,6 +544,8 @@ async def mark_transaction_paid(
         trx.paid_at = datetime.utcnow()
         if delivered_content:
             trx.delivered_content = delivered_content
+        if expires_service_at:
+            trx.expires_service_at = expires_service_at
         await session.commit()
         await session.refresh(trx)
     return trx
@@ -528,8 +564,77 @@ async def get_user_transactions(
     return list(result.scalars().all())
 
 
+async def get_all_paid_transactions_for_export(
+    session: AsyncSession, limit: int = 2000
+) -> List[Tuple[Transaction, Optional[Product], User]]:
+    """Mengambil data transaksi lengkap untuk diexport ke CSV / Excel."""
+    stmt = (
+        select(Transaction, Product, User)
+        .join(User, Transaction.user_id == User.id)
+        .outerjoin(Product, Transaction.product_id == Product.id)
+        .where(Transaction.status == "PAID")
+        .order_by(Transaction.created_at.desc())
+        .limit(limit)
+    )
+    res = await session.execute(stmt)
+    return list(res.all())
+
+
 # ==========================================
-# 7. REVIEW & TESTIMONIAL OPERATIONS
+# 8. SUBSCRIPTION EXPIRY REMINDERS
+# ==========================================
+async def get_due_subscription_reminders(
+    session: AsyncSession,
+) -> Tuple[List[Transaction], List[Transaction]]:
+    """
+    Mengambil transaksi yang perlu dikirim reminder H-3 dan H-1.
+    Returns: (h3_list, h1_list)
+    """
+    now = datetime.utcnow()
+    h3_cutoff = now + timedelta(days=3)
+    h1_cutoff = now + timedelta(days=1)
+
+    # H-3 Reminders: Sisa waktu <= 3 hari dan > 1 hari, reminder_h3_sent = False
+    stmt_h3 = (
+        select(Transaction)
+        .where(Transaction.status == "PAID")
+        .where(Transaction.expires_service_at.is_not(None))
+        .where(Transaction.expires_service_at <= h3_cutoff)
+        .where(Transaction.expires_service_at > h1_cutoff)
+        .where(Transaction.reminder_h3_sent.is_(False))
+    )
+    h3_res = await session.execute(stmt_h3)
+    h3_list = list(h3_res.scalars().all())
+
+    # H-1 Reminders: Sisa waktu <= 1 hari dan > now, reminder_h1_sent = False
+    stmt_h1 = (
+        select(Transaction)
+        .where(Transaction.status == "PAID")
+        .where(Transaction.expires_service_at.is_not(None))
+        .where(Transaction.expires_service_at <= h1_cutoff)
+        .where(Transaction.expires_service_at > now)
+        .where(Transaction.reminder_h1_sent.is_(False))
+    )
+    h1_res = await session.execute(stmt_h1)
+    h1_list = list(h1_res.scalars().all())
+
+    return h3_list, h1_list
+
+
+async def mark_reminder_sent(
+    session: AsyncSession, transaction_id: str, reminder_type: str
+) -> None:
+    trx = await get_transaction_by_id(session, transaction_id)
+    if trx:
+        if reminder_type == "H3":
+            trx.reminder_h3_sent = True
+        elif reminder_type == "H1":
+            trx.reminder_h1_sent = True
+        await session.commit()
+
+
+# ==========================================
+# 9. REVIEW & TESTIMONIAL OPERATIONS
 # ==========================================
 async def create_review(
     session: AsyncSession,
@@ -561,7 +666,7 @@ async def get_review_by_transaction(
 
 
 # ==========================================
-# 8. WARRANTY TICKET OPERATIONS
+# 10. WARRANTY TICKET OPERATIONS
 # ==========================================
 async def create_warranty_ticket(
     session: AsyncSession,

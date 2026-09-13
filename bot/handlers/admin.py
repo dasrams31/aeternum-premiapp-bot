@@ -1,14 +1,17 @@
 """
 Aeternum PremiApp Bot - Admin Management & FSM Handlers
-Panel khusus Admin untuk tambah produk, input stok akun massal, kupon diskon, broadcast, dan laporan.
+Panel khusus Admin untuk manajemen produk, restock notifier, export CSV/Excel, promo, dan broadcast.
 """
 
 import asyncio
+import csv
+from datetime import datetime
+import io
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,6 +43,7 @@ class AddProductState(StatesGroup):
     waiting_for_category = State()
     waiting_for_type = State()
     waiting_for_name = State()
+    waiting_for_duration = State()
     waiting_for_price = State()
     waiting_for_desc = State()
 
@@ -170,7 +174,7 @@ async def cb_start_add_product(
         return
 
     await state.set_state(AddProductState.waiting_for_category)
-    text = "📁 <b>LANGKAH 1/5: PILIH KATEGORI PRODUK</b>\n\nPilih kategori untuk produk baru ini:"
+    text = "📁 <b>LANGKAH 1/6: PILIH KATEGORI PRODUK</b>\n\nPilih kategori untuk produk baru ini:"
     if callback.message:
         await callback.message.edit_text(
             text=text,
@@ -187,9 +191,9 @@ async def cb_pick_product_category(callback: CallbackQuery, state: FSMContext) -
     await state.set_state(AddProductState.waiting_for_type)
 
     text = (
-        "📦 <b>LANGKAH 2/5: PILIH JENIS PRODUK DIGITAL</b>\n\n"
-        "• <b>Akun / Serial Key</b>: Sistem stok habis pakai (dikirim 1 baris per pembeli).\n"
-        "• <b>Teks Statis</b>: Link / Template / Prompt yang sama untuk semua pembeli.\n"
+        "📦 <b>LANGKAH 2/6: PILIH JENIS PRODUK DIGITAL</b>\n\n"
+        "• <b>Akun / Serial Key</b>: Sistem stok habis pakai.\n"
+        "• <b>Teks Statis</b>: Template / Prompt yang sama untuk semua pembeli.\n"
         "• <b>File Dokumen</b>: File ZIP / PDF langsung dari bot.\n"
         "• <b>Akses VIP</b>: Generate invite link channel privat otomatis."
     )
@@ -209,7 +213,7 @@ async def cb_pick_product_type(callback: CallbackQuery, state: FSMContext) -> No
     await state.set_state(AddProductState.waiting_for_name)
 
     text = (
-        "📝 <b>LANGKAH 3/5: NAMA PRODUK</b>\n\n"
+        "📝 <b>LANGKAH 3/6: NAMA PRODUK</b>\n\n"
         "Silakan ketik nama produk yang akan ditampilkan di katalog:\n"
         "<i>(Contoh: Netflix Premium 1 Bulan Private Ultra HD)</i>"
     )
@@ -226,10 +230,27 @@ async def cb_pick_product_type(callback: CallbackQuery, state: FSMContext) -> No
 async def process_product_name(message: Message, state: FSMContext) -> None:
     name = message.text.strip()
     await state.update_data(name=name)
+    await state.set_state(AddProductState.waiting_for_duration)
+
+    await message.answer(
+        "⏱️ <b>LANGKAH 4/6: MASA AKTIF / DURASI (HARI)</b>\n\n"
+        "Berapa hari masa aktif langganan akun ini?\n"
+        "<i>(Ketik <code>30</code> untuk 1 bulan, <code>7</code> untuk 1 minggu, atau <code>0</code> jika masa aktif permanen/lifetime)</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AddProductState.waiting_for_duration)
+async def process_product_duration(message: Message, state: FSMContext) -> None:
+    try:
+        dur = int(message.text.strip())
+    except ValueError:
+        dur = 30
+    await state.update_data(duration_days=dur if dur > 0 else None)
     await state.set_state(AddProductState.waiting_for_price)
 
     await message.answer(
-        "💵 <b>LANGKAH 4/5: HARGA PRODUK</b>\n\n"
+        "💵 <b>LANGKAH 5/6: HARGA PRODUK</b>\n\n"
         "Masukkan nominal harga produk dalam Rupiah (hanya angka):\n"
         "<i>(Contoh: 35000)</i>",
         parse_mode="HTML",
@@ -248,7 +269,7 @@ async def process_product_price(message: Message, state: FSMContext) -> None:
     await state.set_state(AddProductState.waiting_for_desc)
 
     await message.answer(
-        "📄 <b>LANGKAH 5/5: DESKRIPSI & SYARAT GARANSI</b>\n\n"
+        "📄 <b>LANGKAH 6/6: DESKRIPSI & SYARAT GARANSI</b>\n\n"
         "Ketik deskripsi produk, rincian fitur, dan ketentuan garansi:\n"
         "<i>(Ketik <code>-</code> jika ingin mengosongkan deskripsi)</i>",
         parse_mode="HTML",
@@ -272,6 +293,7 @@ async def process_product_desc(
         name=data["name"],
         price=data["price"],
         product_type=p_type,
+        duration_days=data.get("duration_days", 30),
         description=desc,
     )
     await state.clear()
@@ -281,6 +303,7 @@ async def process_product_desc(
         f"🎉 <b>PRODUK BERHASIL DITAMBAHKAN!</b>\n\n"
         f"📦 <b>Nama:</b> {product.name}\n"
         f"💵 <b>Harga:</b> {formatted_price}\n"
+        f"⏱️ <b>Masa Aktif:</b> {product.duration_days or 'Lifetime'} Hari\n"
         f"🏷️ <b>Tipe:</b> <code>{product.product_type}</code>\n\n"
         f"<i>💡 Jika tipe produk adalah Akun / Serial Key, silakan isi stok melalui menu 'Tambah Stok'.</i>",
         reply_markup=admin_main_kb(),
@@ -289,7 +312,7 @@ async def process_product_desc(
 
 
 # ==========================================
-# 3. BULK IMPORT STOK AKUN / TEKS
+# 3. BULK IMPORT STOK & RESTOCK NOTIFIER TRIGGER
 # ==========================================
 @router.callback_query(F.data == "admin_add_stock")
 async def cb_start_add_stock(
@@ -300,9 +323,7 @@ async def cb_start_add_stock(
     products = list(res.scalars().all())
 
     if not products:
-        await callback.answer(
-            "Belum ada produk bertipe Akun / Stok Teks!", show_alert=True
-        )
+        await callback.answer("Belum ada produk bertipe Akun / Stok Teks!", show_alert=True)
         return
 
     await state.set_state(AddStockState.waiting_for_product)
@@ -342,7 +363,7 @@ async def cb_pick_stock_product(callback: CallbackQuery, state: FSMContext) -> N
 
 @router.message(AddStockState.waiting_for_items_text)
 async def process_stock_paste(
-    message: Message, state: FSMContext, session: AsyncSession
+    message: Message, state: FSMContext, session: AsyncSession, bot: Bot
 ) -> None:
     lines = [line.strip() for line in message.text.split("\n") if line.strip()]
     if not lines:
@@ -358,19 +379,104 @@ async def process_stock_paste(
     product = await crud.get_product_by_id(session=session, product_id=product_id)
     new_total = await crud.count_available_stock(session=session, product_id=product_id)
 
+    # Trigger Restock Notifier Broadcast ke pembeli yang menunggu
+    waiting_users = await crud.get_and_clear_restock_subscribers(session=session, product_id=product_id)
+    notif_sent = 0
+    if waiting_users and product:
+        for uid in waiting_users:
+            try:
+                alert_text = (
+                    f"🔔 <b>PRODUK SUDAH RESTOCK!</b>\n\n"
+                    f"Produk <b>{product.name}</b> yang Anda tunggu kini telah tersedia kembali!\n"
+                    f"🟢 <b>Stok Baru:</b> <code>{new_total} item</code>\n"
+                    f"💵 <b>Harga:</b> <code>Rp {product.price:,.0f}</code>\n\n"
+                    f"<i>Buka menu /start -> 🛍️ Katalog Produk untuk memesan sekarang sebelum kehabisan!</i>"
+                ).replace(",", ".")
+                await bot.send_message(chat_id=uid, text=alert_text, parse_mode="HTML")
+                notif_sent += 1
+                await asyncio.sleep(0.05)
+            except Exception:
+                pass
+
     await state.clear()
     await message.answer(
         f"✅ <b>STOK BERHASIL DITAMBAHKAN!</b>\n\n"
         f"📦 <b>Produk:</b> {product.name if product else '-'}\n"
         f"➕ <b>Jumlah Ditambahkan:</b> +{total_added} item\n"
-        f"🟢 <b>Total Stok Tersedia Sekarang:</b> {new_total} item",
+        f"🟢 <b>Total Stok Tersedia Sekarang:</b> {new_total} item\n"
+        f"🔔 <b>Notifikasi Restock Terkirim:</b> {notif_sent} Pembeli",
         reply_markup=admin_main_kb(),
         parse_mode="HTML",
     )
 
 
 # ==========================================
-# 4. WIZARD BUAT KODE PROMO / VOUCHER
+# 4. EXPORT LAPORAN PENJUALAN KE CSV / EXCEL
+# ==========================================
+@router.callback_query(F.data == "admin_export_csv")
+async def cb_export_sales_csv(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    records = await crud.get_all_paid_transactions_for_export(session=session, limit=2000)
+
+    if not records:
+        await callback.answer("Belum ada transaksi lunas untuk diexport!", show_alert=True)
+        return
+
+    # Buat CSV di memori dengan UTF-8 BOM untuk Excel
+    output = io.StringIO()
+    output.write("\ufeff")  # UTF-8 BOM
+    writer = csv.writer(output, delimiter=";")
+
+    # Tulis Header
+    writer.writerow([
+        "No. Invoice",
+        "Waktu Transaksi",
+        "Nama Produk",
+        "Tipe Transaksi",
+        "Metode Pembayaran",
+        "Harga Normal (Rp)",
+        "Potongan Diskon (Rp)",
+        "Kode Promo",
+        "Total Bersih (Rp)",
+        "Telegram User ID",
+        "Username Pembeli",
+        "Nama Pembeli",
+    ])
+
+    for trx, prod, user in records:
+        writer.writerow([
+            trx.id,
+            trx.paid_at.strftime("%Y-%m-%d %H:%M:%S") if trx.paid_at else trx.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            prod.name if prod else ("Top Up Saldo" if trx.trx_type == "TOPUP" else "-"),
+            trx.trx_type,
+            trx.payment_method,
+            f"{trx.original_amount:.2f}",
+            f"{trx.discount_amount:.2f}",
+            trx.promo_code or "-",
+            f"{trx.amount:.2f}",
+            user.id,
+            f"@{user.username}" if user.username else "-",
+            user.first_name or "-",
+        ])
+
+    csv_data = output.getvalue().encode("utf-8")
+    output.close()
+
+    filename = f"Laporan_Penjualan_Aeternum_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.csv"
+    doc_file = BufferedInputFile(csv_data, filename=filename)
+
+    if callback.message:
+        await callback.message.answer_document(
+            document=doc_file,
+            caption=f"📊 <b>Laporan Penjualan Toko ({len(records)} Transaksi Lunas)</b>\n<i>Format CSV terstruktur siap dibuka di Microsoft Excel / Google Sheets.</i>",
+            parse_mode="HTML",
+        )
+    await callback.answer("Laporan berhasil digenerate!")
+
+
+# ==========================================
+# 5. WIZARD BUAT KODE PROMO
 # ==========================================
 @router.callback_query(F.data == "admin_add_promo")
 async def cb_start_add_promo(callback: CallbackQuery, state: FSMContext) -> None:
@@ -471,7 +577,7 @@ async def process_promo_final(
 
 
 # ==========================================
-# 5. BROADCAST NOTIFIKASI MASSAL
+# 6. BROADCAST NOTIFIKASI MASSAL
 # ==========================================
 @router.callback_query(F.data == "admin_broadcast")
 async def cb_start_broadcast(
@@ -497,7 +603,6 @@ async def cb_start_broadcast(
 
 @router.message(BroadcastState.waiting_for_message)
 async def process_broadcast_input(message: Message, state: FSMContext) -> None:
-    # Simpan message_id dan chat_id untuk dicopy saat broadcast
     await state.update_data(
         broadcast_chat_id=message.chat.id,
         broadcast_msg_id=message.message_id,
@@ -536,7 +641,7 @@ async def cb_execute_broadcast(
                 message_id=src_msg_id,
             )
             success_count += 1
-            await asyncio.sleep(0.05)  # Anti flood-limit (max 20-30 msg/sec)
+            await asyncio.sleep(0.05)
         except Exception:
             failed_count += 1
 
@@ -558,7 +663,7 @@ async def cb_execute_broadcast(
 
 
 # ==========================================
-# 6. LAPORAN OMSET & TRANSAKSI
+# 7. LAPORAN OMSET & TRANSAKSI
 # ==========================================
 @router.message(Command("laporan"))
 @router.callback_query(F.data == "admin_reports")

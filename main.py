@@ -1,6 +1,6 @@
 """
 Aeternum PremiApp Bot - Main Application Entrypoint
-Menjalankan Telegram Bot Polling, FastAPI Webhook Server, dan Background Cleaner bersamaan.
+Menjalankan Telegram Bot Polling, FastAPI Webhook Server, Invoice Janitor & Subscription Reminders.
 """
 
 import asyncio
@@ -17,6 +17,7 @@ from database.connection import init_db
 from bot.middlewares.db_session import DatabaseMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.services.cleaner import start_expired_invoice_cleaner
+from bot.services.subscription import start_subscription_reminder_task
 from bot.handlers import (
     admin,
     catalog,
@@ -75,8 +76,9 @@ async def main() -> None:
     )
     server = uvicorn.Server(config)
 
-    # 7. Mulai Background Cleaner untuk Invoice Kedaluwarsa
+    # 7. Mulai Background Tasks (Cleaner & Subscription Reminders)
     cleaner_task = asyncio.create_task(start_expired_invoice_cleaner(interval_seconds=120))
+    subscription_task = asyncio.create_task(start_subscription_reminder_task(bot=bot, interval_seconds=1800))
 
     logger.info(f"FastAPI Webhook berjalan di port {settings.PORT}")
     logger.info("Bot Telegram mulai mendengarkan event polling...")
@@ -90,6 +92,7 @@ async def main() -> None:
         )
     finally:
         cleaner_task.cancel()
+        subscription_task.cancel()
         await bot.session.close()
 
 

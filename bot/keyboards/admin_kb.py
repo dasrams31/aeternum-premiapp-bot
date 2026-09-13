@@ -20,10 +20,11 @@ def admin_main_kb() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="📢 Broadcast Pesan", callback_data="admin_broadcast"),
-        InlineKeyboardButton(text="📊 Laporan & Omset", callback_data="admin_reports"),
+        InlineKeyboardButton(text="📥 Export CSV / Excel", callback_data="admin_export_csv"),
     )
     builder.row(
-        InlineKeyboardButton(text="🔙 Keluar ke Menu Pembeli", callback_data="back_to_main")
+        InlineKeyboardButton(text="📊 Laporan & Omset", callback_data="admin_reports"),
+        InlineKeyboardButton(text="🔙 Menu Pembeli", callback_data="back_to_main"),
     )
     return builder.as_markup()
 
@@ -38,7 +39,6 @@ def confirm_broadcast_kb() -> InlineKeyboardMarkup:
 
 
 def ticket_admin_kb(ticket_code: str, user_id: int) -> InlineKeyboardMarkup:
-    """Tombol aksi Admin saat menerima tiket klaim garansi."""
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="🔄 Kirim Akun Pengganti", callback_data=f"adm_replace_{ticket_code}"),

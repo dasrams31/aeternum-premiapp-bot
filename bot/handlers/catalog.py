@@ -25,7 +25,6 @@ class ApplyPromoState(StatesGroup):
 
 @router.callback_query(F.data == "user_catalog")
 async def cb_show_categories(callback: CallbackQuery, session: AsyncSession) -> None:
-    """Menampilkan daftar kategori produk yang aktif."""
     categories = await crud.get_categories(session=session, only_active=True)
 
     if not categories:
@@ -60,7 +59,6 @@ async def cb_show_categories(callback: CallbackQuery, session: AsyncSession) -> 
 async def cb_show_category_products(
     callback: CallbackQuery, session: AsyncSession
 ) -> None:
-    """Menampilkan daftar produk dalam kategori tertentu beserta sisa stoknya."""
     category_id = int(callback.data.split("_")[1])
     products = await crud.get_products_by_category(
         session=session, category_id=category_id, only_active=True
@@ -106,7 +104,6 @@ async def cb_show_category_products(
 async def cb_show_product_detail(
     callback: CallbackQuery, session: AsyncSession, state: FSMContext
 ) -> None:
-    """Menampilkan detail produk, harga, deskripsi, saldo, dan tombol checkout."""
     await state.clear()
     user = callback.from_user
     product_id = int(callback.data.split("_")[1])
@@ -133,13 +130,14 @@ async def cb_show_product_detail(
     formatted_price = f"Rp {product.price:,.0f}".replace(",", ".")
     formatted_balance = f"Rp {user_balance:,.0f}".replace(",", ".")
     desc_text = product.description or "Tidak ada deskripsi tambahan."
+    duration_info = f"\n⏱️ <b>Masa Aktif:</b> <code>{product.duration_days} Hari</code>" if product.duration_days else ""
 
     text = (
         f"📦 <b>DETAIL PRODUK: {product.name.upper()}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"💵 <b>Harga:</b> <code>{formatted_price}</code>\n"
         f"💳 <b>Saldo Anda:</b> <code>{formatted_balance}</code>\n"
-        f"{stock_info}\n"
+        f"{stock_info}{duration_info}\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📝 <b>Deskripsi & Ketentuan:</b>\n"
         f"{desc_text}\n\n"
@@ -158,6 +156,22 @@ async def cb_show_product_detail(
             parse_mode="HTML",
         )
     await callback.answer()
+
+
+# ==========================================
+# RESTOCK NOTIFIER SUBSCRIPTION
+# ==========================================
+@router.callback_query(F.data.startswith("restock_alert_"))
+async def cb_subscribe_restock(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    product_id = int(callback.data.replace("restock_alert_", ""))
+    success, msg = await crud.subscribe_restock_alert(
+        session=session,
+        product_id=product_id,
+        user_id=callback.from_user.id,
+    )
+    await callback.answer(msg, show_alert=True)
 
 
 # ==========================================
@@ -247,12 +261,4 @@ async def process_promo_input(
             has_promo=True,
         ),
         parse_mode="HTML",
-    )
-
-
-@router.callback_query(F.data == "stock_empty_alert")
-async def cb_stock_empty_alert(callback: CallbackQuery) -> None:
-    await callback.answer(
-        "Mohon maaf, stok produk ini sedang kosong. Admin akan segera melakukan restock!",
-        show_alert=True,
     )
