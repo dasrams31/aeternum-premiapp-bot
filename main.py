@@ -15,7 +15,16 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config import settings
 from database.connection import init_db
 from bot.middlewares.db_session import DatabaseMiddleware
-from bot.handlers import admin, catalog, history, order, start, wallet
+from bot.handlers import (
+    admin,
+    catalog,
+    history,
+    order,
+    review,
+    start,
+    wallet,
+    warranty,
+)
 from webhook.server import app as webhook_app, set_bot_instance
 
 
@@ -47,6 +56,8 @@ async def main() -> None:
     dp.include_router(wallet.router)
     dp.include_router(order.router)
     dp.include_router(history.router)
+    dp.include_router(review.router)
+    dp.include_router(warranty.router)
 
     # 5. Konfigurasi Webhook Server (FastAPI + Uvicorn)
     config = uvicorn.Config(

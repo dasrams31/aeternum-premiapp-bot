@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from pydantic_settings import BaseSettings
 
 
@@ -17,6 +18,9 @@ class Settings(BaseSettings):
     GATEWAY_API_KEY: str = os.getenv("GATEWAY_API_KEY", "")
     GATEWAY_PRIVATE_KEY: str = os.getenv("GATEWAY_PRIVATE_KEY", "")
     GATEWAY_MERCHANT_CODE: str = os.getenv("GATEWAY_MERCHANT_CODE", "")
+
+    # Channel Testimoni (Username @channel atau ID)
+    TESTIMONIAL_CHANNEL_ID: Optional[str] = os.getenv("TESTIMONIAL_CHANNEL_ID", None)
 
     # Webhook
     WEBHOOK_HOST: str = os.getenv("WEBHOOK_HOST", "https://yourdomain.com")

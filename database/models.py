@@ -45,6 +45,12 @@ class User(Base):
     transactions: Mapped[List["Transaction"]] = relationship(
         "Transaction", back_populates="user", cascade="all, delete-orphan"
     )
+    reviews: Mapped[List["Review"]] = relationship(
+        "Review", back_populates="user", cascade="all, delete-orphan"
+    )
+    tickets: Mapped[List["WarrantyTicket"]] = relationship(
+        "WarrantyTicket", back_populates="user", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<User id={self.id} username='{self.username}' balance={self.balance}>"
@@ -178,14 +184,11 @@ class Transaction(Base):
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    # product_id opsional jika transaksi adalah TOPUP deposit
     product_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("products.id", ondelete="RESTRICT"), nullable=True
     )
     
-    # 'PURCHASE' atau 'TOPUP'
     trx_type: Mapped[str] = mapped_column(String(20), default="PURCHASE", index=True)
-    # 'QRIS' atau 'BALANCE'
     payment_method: Mapped[str] = mapped_column(String(30), default="QRIS")
 
     original_amount: Mapped[float] = mapped_column(Numeric(12, 2), default=0.0)
@@ -212,6 +215,65 @@ class Transaction(Base):
 
     user: Mapped["User"] = relationship("User", back_populates="transactions")
     product: Mapped[Optional["Product"]] = relationship("Product", back_populates="transactions")
+    review: Mapped[Optional["Review"]] = relationship("Review", back_populates="transaction", uselist=False)
+    tickets: Mapped[List["WarrantyTicket"]] = relationship("WarrantyTicket", back_populates="transaction")
 
     def __repr__(self) -> str:
         return f"<Transaction id='{self.id}' type='{self.trx_type}' amount={self.amount} status='{self.status}'>"
+
+
+class Review(Base):
+    __tablename__ = "reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    transaction_id: Mapped[str] = mapped_column(
+        String(50), ForeignKey("transactions.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    product_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False
+    )
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)  # 1 to 5
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_posted_to_channel: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    transaction: Mapped["Transaction"] = relationship("Transaction", back_populates="review")
+    user: Mapped["User"] = relationship("User", back_populates="reviews")
+
+
+class WarrantyTicket(Base):
+    __tablename__ = "warranty_tickets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticket_code: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    transaction_id: Mapped[str] = mapped_column(
+        String(50), ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    product_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False
+    )
+    issue_description: Mapped[str] = mapped_column(Text, nullable=False)
+    proof_file_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # 'OPEN', 'RESOLVED', 'REJECTED'
+    status: Mapped[str] = mapped_column(String(30), default="OPEN", index=True)
+    admin_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    replacement_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    transaction: Mapped["Transaction"] = relationship("Transaction", back_populates="tickets")
+    user: Mapped["User"] = relationship("User", back_populates="tickets")

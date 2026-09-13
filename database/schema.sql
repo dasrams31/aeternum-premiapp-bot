@@ -2,7 +2,7 @@
 -- Aeternum PremiApp Bot - PostgreSQL Database Schema
 -- ============================================================
 
--- 1. Tabel Users (Termasuk Dompet Saldo & Afiliasi)
+-- 1. Tabel Users
 CREATE TABLE IF NOT EXISTS users (
     id BIGINT PRIMARY KEY,               -- Telegram User ID
     username VARCHAR(100),
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS product_items (
 CREATE TABLE IF NOT EXISTS promo_codes (
     id SERIAL PRIMARY KEY,
     code VARCHAR(50) UNIQUE NOT NULL,
-    discount_type VARCHAR(20) DEFAULT 'PERCENT', -- 'PERCENT' atau 'FIXED'
+    discount_type VARCHAR(20) DEFAULT 'PERCENT',
     discount_value NUMERIC(12, 2) NOT NULL,
     min_purchase NUMERIC(12, 2) DEFAULT 0.0,
     max_discount NUMERIC(12, 2),
@@ -94,4 +94,32 @@ CREATE TABLE IF NOT EXISTS transactions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     paid_at TIMESTAMP WITH TIME ZONE,
     expired_at TIMESTAMP WITH TIME ZONE
+);
+
+-- 8. Tabel Ulasan & Rating Pelanggan
+CREATE TABLE IF NOT EXISTS reviews (
+    id SERIAL PRIMARY KEY,
+    transaction_id VARCHAR(50) REFERENCES transactions(id) ON DELETE CASCADE UNIQUE NOT NULL,
+    user_id BIGINT REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    product_id INT REFERENCES products(id) ON DELETE CASCADE NOT NULL,
+    rating INT NOT NULL,                 -- 1 sampai 5
+    comment TEXT,
+    is_posted_to_channel BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 9. Tabel Tiket Klaim Garansi & Kendala Akun
+CREATE TABLE IF NOT EXISTS warranty_tickets (
+    id SERIAL PRIMARY KEY,
+    ticket_code VARCHAR(50) UNIQUE NOT NULL,
+    transaction_id VARCHAR(50) REFERENCES transactions(id) ON DELETE CASCADE NOT NULL,
+    user_id BIGINT REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    product_id INT REFERENCES products(id) ON DELETE CASCADE NOT NULL,
+    issue_description TEXT NOT NULL,
+    proof_file_id TEXT,
+    status VARCHAR(30) DEFAULT 'OPEN',   -- 'OPEN', 'RESOLVED', 'REJECTED'
+    admin_notes TEXT,
+    replacement_content TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    resolved_at TIMESTAMP WITH TIME ZONE
 );

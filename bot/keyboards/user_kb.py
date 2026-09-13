@@ -10,9 +10,7 @@ from database.models import Category, Product, Transaction
 
 
 def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
-    """Menu Utama Pembeli."""
     builder = InlineKeyboardBuilder()
-    
     builder.row(
         InlineKeyboardButton(text="🛍️ Katalog Produk", callback_data="user_catalog"),
         InlineKeyboardButton(text="💰 Dompet & Saldo", callback_data="user_wallet"),
@@ -25,17 +23,14 @@ def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="💎 Cara Pembelian", callback_data="user_how_to_buy"),
         InlineKeyboardButton(text="💬 Bantuan / CS", callback_data="user_help"),
     )
-    
     if is_admin:
         builder.row(
             InlineKeyboardButton(text="⚙️ Panel Admin Toko", callback_data="admin_dashboard")
         )
-        
     return builder.as_markup()
 
 
 def wallet_menu_kb() -> InlineKeyboardMarkup:
-    """Menu Dompet Saldo Pengguna."""
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="➕ Top Up Saldo via QRIS", callback_data="wallet_topup")
@@ -48,7 +43,6 @@ def wallet_menu_kb() -> InlineKeyboardMarkup:
 
 
 def topup_presets_kb() -> InlineKeyboardMarkup:
-    """Preset Nominal Top Up Saldo."""
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="Rp 10.000", callback_data="topup_nom_10000"),
@@ -66,7 +60,6 @@ def topup_presets_kb() -> InlineKeyboardMarkup:
 
 
 def categories_kb(categories: List[Category]) -> InlineKeyboardMarkup:
-    """Daftar Kategori Produk."""
     builder = InlineKeyboardBuilder()
     for cat in categories:
         builder.row(
@@ -79,7 +72,6 @@ def categories_kb(categories: List[Category]) -> InlineKeyboardMarkup:
 
 
 def products_kb(products_with_stock: List[tuple[Product, int]]) -> InlineKeyboardMarkup:
-    """Daftar Produk dalam Kategori tertentu."""
     builder = InlineKeyboardBuilder()
     for prod, stock_count in products_with_stock:
         if prod.product_type == "TEXT_STOCK":
@@ -105,12 +97,10 @@ def product_detail_kb(
     current_price: float = 0.0,
     has_promo: bool = False,
 ) -> InlineKeyboardMarkup:
-    """Tombol Aksi pada Halaman Detail Produk."""
     builder = InlineKeyboardBuilder()
     price_to_pay = current_price or float(product.price)
 
     if is_available:
-        # Tombol bayar dengan saldo internal jika cukup
         if user_balance >= price_to_pay:
             builder.row(
                 InlineKeyboardButton(
@@ -151,7 +141,6 @@ def product_detail_kb(
 
 
 def invoice_kb(invoice_id: str) -> InlineKeyboardMarkup:
-    """Tombol Aksi pada Invoice Pembayaran QRIS."""
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="🔄 Cek Status Pembayaran", callback_data=f"check_trx_{invoice_id}")
@@ -163,8 +152,37 @@ def invoice_kb(invoice_id: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def review_prompt_kb(invoice_id: str) -> InlineKeyboardMarkup:
+    """Keyboard rating bintang 1-5 setelah produk berhasil dikirim."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="⭐⭐⭐⭐⭐", callback_data=f"rate_5_{invoice_id}"),
+        InlineKeyboardButton(text="⭐⭐⭐⭐", callback_data=f"rate_4_{invoice_id}"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="⭐⭐⭐", callback_data=f"rate_3_{invoice_id}"),
+        InlineKeyboardButton(text="⭐⭐", callback_data=f"rate_2_{invoice_id}"),
+        InlineKeyboardButton(text="⭐", callback_data=f"rate_1_{invoice_id}"),
+    )
+    return builder.as_markup()
+
+
+def history_detail_kb(invoice_id: str, is_paid: bool) -> InlineKeyboardMarkup:
+    """Tombol pada detail riwayat transaksi lampau."""
+    builder = InlineKeyboardBuilder()
+    if is_paid:
+        builder.row(
+            InlineKeyboardButton(text="⭐ Beri Ulasan", callback_data=f"prompt_rate_{invoice_id}"),
+            InlineKeyboardButton(text="⚠️ Klaim Garansi / Kendala", callback_data=f"claim_warranty_{invoice_id}"),
+        )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Kembali ke Riwayat", callback_data="user_history"),
+        InlineKeyboardButton(text="🏠 Menu Utama", callback_data="back_to_main"),
+    )
+    return builder.as_markup()
+
+
 def history_list_kb(transactions: List[Transaction]) -> InlineKeyboardMarkup:
-    """Daftar Riwayat Transaksi Pengguna."""
     builder = InlineKeyboardBuilder()
     for trx in transactions:
         status_icon = "✅" if trx.status == "PAID" else "⏳" if trx.status == "PENDING" else "❌"
@@ -180,7 +198,6 @@ def history_list_kb(transactions: List[Transaction]) -> InlineKeyboardMarkup:
 
 
 def referral_menu_kb(bot_username: str, user_id: int) -> InlineKeyboardMarkup:
-    """Menu Program Afiliasi & Referral."""
     builder = InlineKeyboardBuilder()
     ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
     share_url = f"https://t.me/share/url?url={ref_link}&text=Beli%20Akun%20Premium%20Otomatis%20di%20Aeternum%20PremiApp"
@@ -196,7 +213,6 @@ def referral_menu_kb(bot_username: str, user_id: int) -> InlineKeyboardMarkup:
 
 
 def back_to_main_kb() -> InlineKeyboardMarkup:
-    """Tombol Navigasi Cepat ke Beranda."""
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="🏠 Kembali ke Menu Utama", callback_data="back_to_main")

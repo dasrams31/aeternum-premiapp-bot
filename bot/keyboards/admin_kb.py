@@ -9,9 +9,7 @@ from database.models import Category, Product
 
 
 def admin_main_kb() -> InlineKeyboardMarkup:
-    """Menu Utama Panel Admin."""
     builder = InlineKeyboardBuilder()
-    
     builder.row(
         InlineKeyboardButton(text="➕ Tambah Produk", callback_data="admin_add_product"),
         InlineKeyboardButton(text="📁 Kelola Kategori", callback_data="admin_manage_categories"),
@@ -31,7 +29,6 @@ def admin_main_kb() -> InlineKeyboardMarkup:
 
 
 def confirm_broadcast_kb() -> InlineKeyboardMarkup:
-    """Konfirmasi Pengiriman Broadcast."""
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="🚀 Kirim Broadcast Sekarang", callback_data="confirm_send_broadcast"),
@@ -40,15 +37,25 @@ def confirm_broadcast_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def select_category_kb(categories: list[Category], action_prefix: str = "adm_cat") -> InlineKeyboardMarkup:
-    """Pilihan Kategori saat Admin Tambah Produk."""
+def ticket_admin_kb(ticket_code: str, user_id: int) -> InlineKeyboardMarkup:
+    """Tombol aksi Admin saat menerima tiket klaim garansi."""
     builder = InlineKeyboardBuilder()
-    
+    builder.row(
+        InlineKeyboardButton(text="🔄 Kirim Akun Pengganti", callback_data=f"adm_replace_{ticket_code}"),
+        InlineKeyboardButton(text="💬 Balas Pesan", callback_data=f"adm_reply_{ticket_code}"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="❌ Tolak Klaim", callback_data=f"adm_reject_{ticket_code}")
+    )
+    return builder.as_markup()
+
+
+def select_category_kb(categories: list[Category], action_prefix: str = "adm_cat") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
     for cat in categories:
         builder.row(
             InlineKeyboardButton(text=f"📁 {cat.name}", callback_data=f"{action_prefix}_{cat.id}")
         )
-        
     builder.row(
         InlineKeyboardButton(text="➕ Buat Kategori Baru", callback_data="admin_create_category"),
         InlineKeyboardButton(text="❌ Batalkan", callback_data="admin_dashboard"),
@@ -57,9 +64,7 @@ def select_category_kb(categories: list[Category], action_prefix: str = "adm_cat
 
 
 def select_product_type_kb() -> InlineKeyboardMarkup:
-    """Pilihan Jenis Produk Digital yang Akan Dijual."""
     builder = InlineKeyboardBuilder()
-    
     builder.row(
         InlineKeyboardButton(text="🔑 Akun / Serial Key (Stok Unik)", callback_data="type_TEXT_STOCK")
     )
@@ -79,7 +84,6 @@ def select_product_type_kb() -> InlineKeyboardMarkup:
 
 
 def select_discount_type_kb() -> InlineKeyboardMarkup:
-    """Pilihan Jenis Diskon Kupon."""
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="📊 Persentase (%)", callback_data="promo_type_PERCENT"),
@@ -92,15 +96,12 @@ def select_discount_type_kb() -> InlineKeyboardMarkup:
 
 
 def select_product_for_stock_kb(products: list[Product]) -> InlineKeyboardMarkup:
-    """Pilihan Produk saat Admin Ingin Menambah Stok Teks."""
     builder = InlineKeyboardBuilder()
-    
     for prod in products:
         if prod.product_type == "TEXT_STOCK":
             builder.row(
                 InlineKeyboardButton(text=f"📦 {prod.name}", callback_data=f"adm_stock_{prod.id}")
             )
-            
     builder.row(
         InlineKeyboardButton(text="🔙 Kembali ke Panel Admin", callback_data="admin_dashboard")
     )
@@ -108,7 +109,6 @@ def select_product_for_stock_kb(products: list[Product]) -> InlineKeyboardMarkup
 
 
 def cancel_admin_action_kb() -> InlineKeyboardMarkup:
-    """Tombol Batal Aksi Admin."""
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="❌ Batalkan Aksi", callback_data="admin_dashboard")

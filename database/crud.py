@@ -7,7 +7,17 @@ from typing import List, Optional, Tuple
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Category, Product, ProductItem, PromoCode, PromoUsage, Transaction, User
+from .models import (
+    Category,
+    Product,
+    ProductItem,
+    PromoCode,
+    PromoUsage,
+    Review,
+    Transaction,
+    User,
+    WarrantyTicket,
+)
 
 
 # ==========================================
@@ -66,7 +76,6 @@ async def get_user_by_id(session: AsyncSession, user_id: int) -> Optional[User]:
 
 
 async def get_all_user_ids(session: AsyncSession) -> List[int]:
-    """Mengambil seluruh ID pengguna untuk broadcast massal."""
     stmt = select(User.id)
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -75,7 +84,6 @@ async def get_all_user_ids(session: AsyncSession) -> List[int]:
 async def add_user_balance(
     session: AsyncSession, user_id: int, amount: float
 ) -> Optional[User]:
-    """Menambahkan saldo utama dompet pengguna."""
     user = await get_user_by_id(session, user_id)
     if user:
         user.balance = float(user.balance or 0.0) + amount
@@ -87,10 +95,6 @@ async def add_user_balance(
 async def deduct_user_balance_atomic(
     session: AsyncSession, user_id: int, amount: float
 ) -> bool:
-    """
-    Mengurangi saldo pengguna secara atomic dengan lock.
-    Mengembalikan True jika saldo cukup dan berhasil dipotong.
-    """
     stmt = (
         select(User)
         .where(User.id == user_id)
@@ -420,3 +424,88 @@ async def get_user_transactions(
     )
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+# ==========================================
+# 7. REVIEW & TESTIMONIAL OPERATIONS
+# ==========================================
+async def create_review(
+    session: AsyncSession,
+    transaction_id: str,
+    user_id: int,
+    product_id: int,
+    rating: int,
+    comment: Optional[str] = None,
+) -> Review:
+    review = Review(
+        transaction_id=transaction_id,
+        user_id=user_id,
+        product_id=product_id,
+        rating=rating,
+        comment=comment,
+    )
+    session.add(review)
+    await session.commit()
+    await session.refresh(review)
+    return review
+
+
+async def get_review_by_transaction(
+    session: AsyncSession, transaction_id: str
+) -> Optional[Review]:
+    stmt = select(Review).where(Review.transaction_id == transaction_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+# ==========================================
+# 8. WARRANTY TICKET OPERATIONS
+# ==========================================
+async def create_warranty_ticket(
+    session: AsyncSession,
+    ticket_code: str,
+    transaction_id: str,
+    user_id: int,
+    product_id: int,
+    issue_description: str,
+    proof_file_id: Optional[str] = None,
+) -> WarrantyTicket:
+    ticket = WarrantyTicket(
+        ticket_code=ticket_code,
+        transaction_id=transaction_id,
+        user_id=user_id,
+        product_id=product_id,
+        issue_description=issue_description,
+        proof_file_id=proof_file_id,
+        status="OPEN",
+    )
+    session.add(ticket)
+    await session.commit()
+    await session.refresh(ticket)
+    return ticket
+
+
+async def get_warranty_ticket_by_code(
+    session: AsyncSession, ticket_code: str
+) -> Optional[WarrantyTicket]:
+    stmt = select(WarrantyTicket).where(WarrantyTicket.ticket_code == ticket_code)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def resolve_warranty_ticket(
+    session: AsyncSession,
+    ticket_code: str,
+    status: str,
+    admin_notes: Optional[str] = None,
+    replacement_content: Optional[str] = None,
+) -> Optional[WarrantyTicket]:
+    ticket = await get_warranty_ticket_by_code(session, ticket_code)
+    if ticket:
+        ticket.status = status
+        ticket.admin_notes = admin_notes
+        ticket.replacement_content = replacement_content
+        ticket.resolved_at = datetime.utcnow()
+        await session.commit()
+        await session.refresh(ticket)
+    return ticket

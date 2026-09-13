@@ -1,6 +1,6 @@
 """
 Aeternum PremiApp Bot - Automated Fulfillment & Commission Engine
-Pengiriman produk instan, pencatatan promo, dan reward komisi referral.
+Pengiriman produk instan, pencatatan promo, pembagian komisi, dan prompt ulasan.
 """
 
 import logging
@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import crud
 from database.models import Product, PromoCode, Transaction, User
+from bot.keyboards.user_kb import review_prompt_kb
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ async def deliver_purchased_product(
 ) -> bool:
     """
     Mengirimkan produk yang berhasil dibayar ke chat pembeli secara otomatis,
-    mencatat promo, dan membagikan komisi referral.
+    mencatat promo, membagikan komisi referral, dan mengirimkan prompt ulasan.
     """
     user_id = transaction.user_id
     delivered_text = ""
@@ -151,7 +152,7 @@ async def deliver_purchased_product(
             )
 
         # ==========================================
-        # 5. CATAT PENGGUNAAN PROMO (JIKA ADA)
+        # 5. CATAT PENGGUNAAN PROMO
         # ==========================================
         if transaction.promo_code:
             promo_res = await session.execute(
@@ -174,7 +175,7 @@ async def deliver_purchased_product(
         buyer = user_res.scalar_one_or_none()
 
         if buyer and buyer.referred_by:
-            commission = float(transaction.amount) * 0.05  # 5% komisi
+            commission = float(transaction.amount) * 0.05
             if commission > 0:
                 await crud.add_referral_commission(
                     session=session,
@@ -195,6 +196,24 @@ async def deliver_purchased_product(
                     )
                 except Exception:
                     pass
+
+        # ==========================================
+        # 7. KIRIM PROMPT RATING & ULASAN
+        # ==========================================
+        try:
+            review_prompt_text = (
+                f"⭐ <b>BAGAIMANA PENGALAMAN BERBELANJA ANDA?</b>\n\n"
+                f"Pesanan untuk <b>{product.name}</b> telah selesai.\n"
+                f"Beri kami nilai untuk membantu meningkatkan kualitas layanan kami:"
+            )
+            await bot.send_message(
+                chat_id=user_id,
+                text=review_prompt_text,
+                reply_markup=review_prompt_kb(transaction.id),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
 
         # Catat status transaksi PAID & arsip konten terkirim
         await crud.mark_transaction_paid(

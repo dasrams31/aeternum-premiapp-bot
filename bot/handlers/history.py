@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import crud
-from bot.keyboards.user_kb import back_to_main_kb, history_list_kb
+from bot.keyboards.user_kb import back_to_main_kb, history_detail_kb, history_list_kb
 
 router = Router(name="history_router")
 
@@ -18,7 +18,6 @@ router = Router(name="history_router")
 async def show_user_history(
     event: Message | CallbackQuery, session: AsyncSession
 ) -> None:
-    """Menampilkan 10 transaksi terakhir milik pembeli."""
     user = event.from_user
     if not user:
         return
@@ -72,7 +71,6 @@ async def show_user_history(
 async def cb_view_history_detail(
     callback: CallbackQuery, session: AsyncSession
 ) -> None:
-    """Melihat detail pesanan lampau dan konten produk yang diterima."""
     invoice_id = callback.data.replace("view_hist_", "")
     trx = await crud.get_transaction_by_id(session=session, transaction_id=invoice_id)
 
@@ -80,8 +78,8 @@ async def cb_view_history_detail(
         await callback.answer("Pesanan tidak ditemukan!", show_alert=True)
         return
 
-    product = await crud.get_product_by_id(session=session, product_id=trx.product_id)
-    product_name = product.name if product else "Produk Digital"
+    product = await crud.get_product_by_id(session=session, product_id=trx.product_id) if trx.product_id else None
+    product_name = product.name if product else ("Top Up Saldo" if trx.trx_type == "TOPUP" else "Produk Digital")
 
     status_badge = "✅ LUNAS" if trx.status == "PAID" else "⏳ MENUNGGU PEMBAYARAN" if trx.status == "PENDING" else "❌ DIBATALKAN"
     formatted_price = f"Rp {trx.amount:,.0f}".replace(",", ".")
@@ -104,7 +102,7 @@ async def cb_view_history_detail(
     if callback.message:
         await callback.message.edit_text(
             text=text,
-            reply_markup=back_to_main_kb(),
+            reply_markup=history_detail_kb(invoice_id=trx.id, is_paid=trx.status == "PAID"),
             parse_mode="HTML",
         )
     await callback.answer()

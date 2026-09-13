@@ -14,7 +14,7 @@
 
 ---
 
-## 🚀 Fitur Utama
+## 🚀 Fitur Utama Lengkap
 1. **Pembayaran Otomatis QRIS Dinamis**:
    - Mendukung semua E-Wallet (GoPay, OVO, DANA, ShopeePay, LinkAja) dan Mobile Banking (BCA, Mandiri, BRI, BNI, dll).
    - Verifikasi transaksi instan secara real-time via Webhook.
@@ -27,13 +27,15 @@
 4. **👥 Program Afiliasi & Referral Organik**:
    - Link referral unik per pengguna (`/start ref_USERID`).
    - Pembagian komisi otomatis 5% dari setiap pembelian teman langsung ke saldo komisi.
-5. **📢 Broadcast Notifikasi Massal (Admin Tool)**:
+5. **⭐ Sistem Rating & Auto-Testimoni ke Channel**:
+   - Prompt ulasan bintang 1-5 dan komentar setelah pesanan selesai.
+   - Ulasan positif (bintang 4 & 5) otomatis diformat dan diposting ke Channel Publik Testimoni.
+6. **🛡️ Sistem Tiket Klaim Garansi & Kendala Akun**:
+   - Pembeli dapat mengajukan klaim garansi pada menu riwayat lengkap dengan bukti foto screenshot.
+   - Admin dapat menyelesaikan tiket langsung dari DM Telegram (`[ Kirim Akun Pengganti ]` / `[ Tolak ]`).
+7. **📢 Broadcast Notifikasi Massal (Admin Tool)**:
    - Admin dapat mengirimkan siaran pesan promosi/restock ke seluruh pengguna terdaftar dengan preview & anti-flood protection.
-6. **Panel Admin Interaktif di Telegram**:
-   - Wizard tambah kategori, produk, kupon promo, dan broadcast langsung dari chat.
-   - Bulk import stok teks/akun (paste multi-baris).
-   - Notifikasi real-time ke DM Admin setiap ada penjualan atau stok menipis.
-7. **Keamanan & Anti-Fraud**:
+8. **Keamanan & Anti-Fraud**:
    - Transaksi concurrency lock (anti pembeli ganda pada 1 akun unik).
    - Parameter `protect_content=True` mencegah forward dan screenshot teks rahasia.
 
@@ -46,10 +48,12 @@ aeternum-premiapp-bot/
 │   ├── handlers/          # Router perintah & alur chat
 │   │   ├── admin.py       # Panel manajemen produk, stok, kupon & broadcast
 │   │   ├── catalog.py     # Navigasi katalog & input kode promo
-│   │   ├── history.py     # Riwayat belanja pengguna
+│   │   ├── history.py     # Riwayat belanja pengguna & klaim garansi
 │   │   ├── order.py       # Pembuatan invoice QRIS dinamis
+│   │   ├── review.py      # Rating bintang & komentar testimoni
 │   │   ├── start.py       # Menu utama, panduan & referral dashboard
-│   │   └── wallet.py      # Top up deposit QRIS & bayar pakai saldo
+│   │   ├── wallet.py      # Top up deposit QRIS & bayar pakai saldo
+│   │   └── warranty.py    # Tiket garansi & resolusi kendala akun
 │   ├── keyboards/         # Inline keyboard builder (User & Admin UI)
 │   ├── middlewares/       # Anti-spam & filter otorisasi admin
 │   └── services/          # Fulfillment engine, referral reward & protect content
