@@ -1,7 +1,8 @@
 # PANDUAN INSTALASI & SETUP VPS BARU 🚀
 ## Aeternum PremiApp Bot
+**Official Primary Admin & Owner: @dasrams**
 
-Panduan ini mempermudah pemindahan (*migrasi*) atau instalasi baru **Aeternum PremiApp Bot** pada VPS baru (Ubuntu 20.04 / 22.04 / 24.04 LTS / Debian).
+Panduan ini mempermudah pemindahan (*migrasi*) atau instalasi baru **Aeternum PremiApp Bot** pada VPS baru (Ubuntu 20.04 / 22.04 / 24.04 LTS / Debian) dengan integrasi resmi **BAYAR GG (QRIS Dinamis API)**, Telegram Mini App, Auto-Payment Poller, dan Enkripsi Database AES-256.
 
 ---
 
@@ -19,13 +20,14 @@ sudo bash scripts/install.sh
 ```
 
 ### Apa yang Dilakukan oleh Skrip Installer Otomatis?
-1. Menginstall seluruh paket Linux (`Python3`, `PostgreSQL`, `Nginx`, `Certbot`, `UFW`, `libpq-dev`).
+1. Menginstall seluruh paket Linux (`Python3`, `Pillow C-Libs`, `PostgreSQL`, `Nginx`, `Certbot`, `UFW`, `libpq-dev`).
 2. Membuat database PostgreSQL `aeternum_premiapp_db` dan user terautentikasi otomatis.
-3. Menyiapkan Python Virtual Environment (`venv`) dan menginstall semua pustaka dependensi.
-4. Memandu input token bot, Admin ID (`606533609`), dan membuat kunci enkripsi AES-256 secara acak dan aman.
+3. Menyiapkan Python Virtual Environment (`venv`) dan menginstall semua pustaka dependensi (`aiogram 3.x`, `fastapi`, `sqlalchemy`, `qrcode`, `pillow`, `cryptography`).
+4. Memandu input token bot, Admin ID (`606533609`), API Key BAYAR GG, dan mengenerate kunci enkripsi AES-256 secara acak dan aman.
 5. Menginisialisasi seluruh skema tabel, relasi, dan indeks database secara otomatis.
 6. Mendaftarkan layanan latar belakang **Systemd (`aeternum-bot.service`)** dengan fitur auto-restart saat VPS reboot / crash.
-7. Memasang cronjob backup harian otomatis (`scripts/backup_db.sh`) dengan rotasi retensi 7 hari.
+7. Mengaktifkan **Background Auto-Payment Poller per 6 detik** (Deteksi pembayaran QRIS instan tanpa menunggu webhook).
+8. Memasang cronjob backup harian otomatis (`scripts/backup_db.sh`) dengan rotasi retensi 7 hari.
 
 ---
 
@@ -33,9 +35,9 @@ sudo bash scripts/install.sh
 
 Jika Anda ingin mengontrol setiap langkah instalasi secara manual:
 
-### 1. Update Paket & Install Dependensi
+### 1. Update Paket & Install Dependensi Sistem
 ```bash
-sudo apt update && sudo apt install -y python3 python3-pip python3-venv postgresql postgresql-contrib libpq-dev git
+sudo apt update && sudo apt install -y python3 python3-pip python3-venv postgresql postgresql-contrib libpq-dev libjpeg-dev zlib1g-dev libpng-dev git
 ```
 
 ### 2. Konfigurasi Database PostgreSQL
@@ -44,7 +46,7 @@ sudo -u postgres psql -c "CREATE DATABASE aeternum_premiapp_db;"
 sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'secretpassword';"
 ```
 
-### 3. Setup Virtual Environment Python
+### 3. Setup Virtual Environment Python & Install Libraries
 ```bash
 python3 -m venv venv
 source venv/bin/activate
@@ -63,27 +65,29 @@ Isi konfigurasi minimal:
 BOT_TOKEN=8623661389:AAGyE4EIYHiYF8nUD11V_QTriSFvbluBTvQ
 ADMIN_ID=606533609
 DATABASE_URL=postgresql+asyncpg://postgres:secretpassword@localhost:5432/aeternum_premiapp_db
-PAYMENT_GATEWAY=tripay
+PAYMENT_GATEWAY=bayargg
+GATEWAY_API_KEY=API-b1cc9b5a6aed30454d7e2cb462c61aec10686bef6bd789bc
+ENCRYPTION_KEY=AeternumSecretKey2026AES256SecureSalt
 PORT=8088
 ```
 
-### 5. Inisialisasi Database & Test
+### 5. Inisialisasi Database & Uji Sistem
 ```bash
-venv/bin/python -c "import asyncio; from database.connection import init_db; asyncio.run(init_db())"
+venv/bin/python tests/test_suite.py
 ```
 
-### 6. Setup Systemd Service
+### 6. Setup Systemd Background Service
 Buat file service di `/etc/systemd/system/aeternum-bot.service`:
 ```ini
 [Unit]
-Description=Aeternum PremiApp Telegram Bot and Webhook Server
+Description=Aeternum PremiApp Telegram Bot, Webhook Server and Auto-Payment Poller
 After=network.target postgresql.service
 
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/path/to/aeternum-premiapp-bot
-ExecStart=/path/to/aeternum-premiapp-bot/venv/bin/python main.py
+WorkingDirectory=/home/ubuntu/aeternum-premiapp-bot
+ExecStart=/home/ubuntu/aeternum-premiapp-bot/venv/bin/python main.py
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
@@ -96,20 +100,6 @@ Aktifkan dan jalankan:
 sudo systemctl daemon-reload
 sudo systemctl enable aeternum-bot
 sudo systemctl start aeternum-bot
-```
-
----
-
-## METODE 3: DEPLOYMENT DOCKER COMPOSE
-
-Jika VPS Anda menggunakan Docker:
-
-```bash
-# 1. Salin konfigurasi environment
-cp .env.example .env
-
-# 2. Jalankan skrip docker
-bash scripts/install_docker.sh
 ```
 
 ---
