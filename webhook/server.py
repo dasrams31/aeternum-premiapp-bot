@@ -3,6 +3,7 @@ Aeternum PremiApp Bot - FastAPI Webhook Server
 Menerima notifikasi pembayaran sukses dari Payment Gateway QRIS dengan verifikasi signature & IP whitelisting.
 """
 
+from datetime import datetime
 import json
 import logging
 from aiogram import Bot
@@ -88,6 +89,20 @@ async def handle_payment_webhook(
 
     merchant_ref = data.get("merchant_ref") or data.get("order_id") or data.get("reference")
     status = (data.get("status") or "").upper()
+    callback_time = data.get("timestamp") or data.get("created_at") or data.get("time")
+
+    # Anti-Replay Attack Check (Jika ada timestamp pada payload)
+    if callback_time:
+        try:
+            # Jika integer unix timestamp
+            if isinstance(callback_time, (int, float)):
+                req_ts = float(callback_time)
+                now_ts = datetime.utcnow().timestamp()
+                if abs(now_ts - req_ts) > 300:  # Lebih dari 5 menit
+                    logger.warning(f"🚨 [ANTI-REPLAY] Request Webhook kedaluwarsa! Selisih waktu: {abs(now_ts - req_ts)}s")
+                    raise HTTPException(status_code=400, detail="Expired Webhook Request")
+        except (ValueError, TypeError):
+            pass
 
     if not merchant_ref:
         raise HTTPException(status_code=400, detail="Missing merchant_ref / order_id")

@@ -1,6 +1,7 @@
 """
 Aeternum PremiApp Bot - Main Application Entrypoint
 Menjalankan Telegram Bot Polling, FastAPI Webhook Server, Invoice Janitor & Subscription Reminders.
+Dilengkapi Global Error Middleware, Throttling Anti-Spam, dan Database Session Injection.
 """
 
 import asyncio
@@ -15,6 +16,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config import settings
 from database.connection import init_db
 from bot.middlewares.db_session import DatabaseMiddleware
+from bot.middlewares.error_handler import GlobalErrorMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.services.cleaner import start_expired_invoice_cleaner
 from bot.services.subscription import start_subscription_reminder_task
@@ -51,7 +53,8 @@ async def main() -> None:
     # Berikan instance bot ke webhook server untuk notifikasi pengiriman otomatis
     set_bot_instance(bot)
 
-    # 4. Daftarkan Middlewares (Throttling Anti-Spam & DB Session)
+    # 4. Daftarkan Middlewares (Global Error Handler, Throttling Anti-Spam & DB Session)
+    dp.update.middleware(GlobalErrorMiddleware(bot=bot))
     dp.message.middleware(ThrottlingMiddleware(rate_limit=0.8))
     dp.callback_query.middleware(ThrottlingMiddleware(rate_limit=0.8))
     dp.update.middleware(DatabaseMiddleware())

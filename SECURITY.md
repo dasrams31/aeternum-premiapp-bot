@@ -1,81 +1,64 @@
-# PANDUAN HARDENING SECURITY & PRODUCTION CHECKLIST 🛡️
+# PANDUAN HARDENING SECURITY & PRODUCTION ARCHITECTURE 🛡️
 ## Aeternum PremiApp Bot
 
-Dokumen ini berisi panduan lengkap pengamanan sistem (Security Hardening) sebelum aplikasi dideploy ke lingkungan produksi (*Live Production*).
+Dokumen ini berisi arsitektur keamanan menyeluruh (*Defense-in-Depth*) yang telah diterapkan pada **Aeternum PremiApp Bot** untuk memastikan transaksi finansial, kredensial akun, dan server terlindungi dari berbagai vektor serangan.
 
 ---
 
-### 1. KEAMANAN PAYMENT GATEWAY & WEBHOOK (FINANCIAL SHIELD)
-
-* **Wajib Verifikasi Signature Webhook**:
-  - Jangan pernah mempercayai payload callback tanpa memvalidasi HMAC SHA256 / SHA512 signature dari Payment Gateway.
-  - Skrip verifikasi signature telah tersedia di `webhook/gateway.py`.
-* **Idempotensi & Anti Double Delivery**:
-  - Webhook gateway bisa mengirimkan callback berulang jika jaringan lambat (*retry mechanism*).
-  - Sistem telah dilengkapi pengecekan `if trx.status == 'PAID': return {"success": True}` untuk mencegah pengiriman akun/stok dua kali pada 1 pembayaran.
-* **IP Whitelisting Payment Gateway (Nginx Layer)**:
-  - Batasi akses ke endpoint `/webhook/payment` hanya dari IP resmi Payment Gateway (misal: IP Tripay / Pakasir).
-  - Contoh konfigurasi Nginx:
-    ```nginx
-    location /webhook/payment {
-        # Izinkan hanya IP Gateway
-        allow 103.150.190.0/24;  # Contoh IP Gateway
-        deny all;
-        proxy_pass http://127.0.0.1:8000;
-    }
-    ```
+### 1. 🔐 ENCRYPTION AT REST (AES-256 FERNET)
+* **Lokasi**: `bot/services/crypto.py`
+* **Mekanisme**:
+  - Setiap kredensial akun (*email:password*), serial key, atau teks lisensi yang diinput via Bulk Import otomatis dienkripsi dengan algoritma **AES-256 (Fernet)** sebelum disimpan ke kolom `content` di tabel `product_items` PostgreSQL.
+  - Jika database dibobol atau file dump backup bocor, penyerang hanya melihat hash terenkripsi `ENC::gAAAAAB...` yang tidak dapat dibaca.
+  - Teks hanya didekripsi di memori pada saat proses pengiriman instan ke chat pembeli yang sah.
 
 ---
 
-### 2. KEAMANAN BOT TELEGRAM (APPLICATION LAYER)
-
-* **Throttling & Anti-Flood Protection**:
-  - `ThrottlingMiddleware` diaktifkan untuk mencegah pengguna melakukan *spam click* pada tombol katalog / order yang bisa membebani database.
-* **Proteksi Konten Sensitif (`protect_content=True`)**:
-  - Seluruh pengiriman akun, kredensial teks, dan dokumen otomatis mengaktifkan flag `protect_content=True` agar pembeli tidak bisa meneruskan (*forward*) atau mengambil screenshot di HP Android.
-* **Role-Based Authorization**:
-  - Seluruh akses panel admin, tambah produk, bulk stock, dan broadcast dilindungi pemeriksaan ketat `user.id == settings.ADMIN_ID`.
+### 2. 🛡️ STEALTH MODE & SILENT DROP ADMIN
+* **Lokasi**: `bot/handlers/admin.py`
+* **Mekanisme**:
+  - Jika ada pengguna selain ID Telegram Admin (`ADMIN_ID`) yang mengetik `/admin` atau mencoba menembak callback query admin (`adm_xxx`), sistem **langsung membuang request tanpa respons (Silent Drop)**.
+  - Bot tidak membalas pesan "Akses Ditolak" sehingga penyerang tidak mengetahui keberadaan panel manajemen.
+  - Setiap upaya akses ilegal dicatat ke log peringatan keamanan server.
 
 ---
 
-### 3. KEAMANAN DATABASE POSTGRESQL (DATA LAYER)
-
-* **Mencegah Concurrency Race Condition**:
-  - Penarikan stok teks menggunakan klausa `SELECT ... FOR UPDATE SKIP LOCKED` sehingga jika ada 100 pembeli bayar bersamaan pada 1 detik yang sama, tidak akan ada 2 pembeli yang menerima akun yang sama.
-* **Prinsip Least Privilege**:
-  - Buat user PostgreSQL khusus bot dengan hak akses terbatas pada database `aeternum_premiapp_db` (jangan gunakan user superuser `postgres` di production).
-* **Backup Otomatis Berkala (Cronjob Backup)**:
-  - Pasang script backup otomatis setiap hari pukul 02:00 WIB:
-    ```bash
-    0 2 * * * pg_dump -U aeternum_user -d aeternum_premiapp_db | gzip > /backups/db_$(date +\%Y\%m\%d).sql.gz
-    ```
+### 3. ⏱️ ANTI-REPLAY ATTACK & WEBHOOK IDEMPOTENCY
+* **Lokasi**: `webhook/server.py` & `webhook/gateway.py`
+* **Mekanisme**:
+  - **Timestamp Expiry**: Payload webhook yang memiliki selisih waktu lebih dari 5 menit (300 detik) otomatis ditolak dengan `400 Bad Request`.
+  - **HMAC Signature Check**: Wajib memvalidasi signature HMAC SHA512 dari payment gateway.
+  - **Idempotency**: Transaksi yang sudah berstatus `PAID` tidak akan memproses pengiriman produk ulang.
 
 ---
 
-### 4. KEAMANAN INFRASTRUKTUR & SERVER (INFRA LAYER)
-
-* **Gunakan Reverse Proxy Nginx + SSL (HTTPS)**:
-  - Jangan mengekspos port 8000 langsung ke internet publik.
-  - Gunakan Nginx dengan sertifikat SSL gratis dari Let's Encrypt (Certbot).
-* **Firewall Server (UFW)**:
-  - Buka hanya port yang diperlukan:
-    ```bash
-    sudo ufw default deny incoming
-    sudo ufw default allow outgoing
-    sudo ufw allow 22/tcp    # SSH
-    sudo ufw allow 80/tcp    # HTTP
-    sudo ufw allow 443/tcp   # HTTPS
-    sudo ufw enable
-    ```
-* **Proteksi Token & Secrets**:
-  - File `.env` **TIDAK BOLEH** dikomit ke Git (sudah masuk di `.gitignore`).
-  - Ganti nilai `secretpassword` pada PostgreSQL dan `ADMIN_ID` dengan data asli.
+### 4. 🐳 DOCKER CONTAINER HARDENING (NON-ROOT)
+* **Lokasi**: `Dockerfile`
+* **Mekanisme**:
+  - Container dijalankan dengan user non-root `appuser` (UID 1000).
+  - Mengurangi risiko eskalasi hak akses (*privilege escalation*) jika terjadi eksploitasi pada library pihak ketiga.
 
 ---
 
-### 5. SISTEM MONITORING & ERROR ALERTING
+### 5. 🚫 GLOBAL ERROR MASKING & ADMIN CRASH ALERT
+* **Lokasi**: `bot/middlewares/error_handler.py`
+* **Mekanisme**:
+  - Semua unhandled exception ditangkap secara global.
+  - **Ke Pengguna**: Menampilkan pesan sopan ramah tanpa membocorkan pesan error Python, struktur query SQL, atau direktori server.
+  - **Ke Admin DM**: Mengirimkan alert real-time lengkap dengan detail error, nama user, event type, dan potongan *traceback* untuk investigasi cepat.
 
-* **Auto Expired Invoice Janitor**:
-  - Service background berjalan setiap 2 menit untuk membatalkan invoice PENDING yang telah melewati 15 menit agar tidak menumpuk.
-* **Crash & Unhandled Exception Notifier**:
-  - Logging terpusat dengan log rotation untuk memudahkan audit transaksi.
+---
+
+### 6. 🌐 NGINX RATE LIMITING & REVERSE PROXY
+* **Lokasi**: `nginx/aeternum.conf`
+* **Mekanisme**:
+  - Rate limiting pada endpoint webhook (max 10 request/detik) untuk memitigasi serangan DDoS / HTTP Flooding.
+  - Header keamanan HSTS, X-Frame-Options DENY, dan X-Content-Type-Options nosniff.
+
+---
+
+### 7. 🗄️ BACKUP OTOMATIS & CONCURRENCY LOCK
+* **Lokasi**: `scripts/backup_db.sh` & `database/crud.py`
+* **Mekanisme**:
+  - Rotasi backup PostgreSQL otomatis 7 hari via script cronjob.
+  - Concurrency Lock `SELECT ... FOR UPDATE SKIP LOCKED` pada sistem reservasi stok 15 menit.

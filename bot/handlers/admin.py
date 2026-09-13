@@ -7,7 +7,10 @@ import asyncio
 import csv
 from datetime import datetime
 import io
+import logging
 from aiogram import Bot, F, Router
+
+logger = logging.getLogger(__name__)
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -67,7 +70,10 @@ class BroadcastState(StatesGroup):
 
 
 def is_admin_filter(user_id: int) -> bool:
-    return user_id == settings.ADMIN_ID
+    is_adm = user_id == settings.ADMIN_ID
+    if not is_adm:
+        logger.warning(f"🚨 [STEALTH DROP] Unauthorized admin command attempt from user ID: {user_id}")
+    return is_adm
 
 
 @router.message(Command("admin"))

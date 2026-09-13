@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.services.crypto import encrypt_text, decrypt_text
 from .models import (
     Category,
     Product,
@@ -324,7 +325,7 @@ async def add_stock_items_bulk(
     session: AsyncSession, product_id: int, contents: List[str]
 ) -> int:
     items = [
-        ProductItem(product_id=product_id, content=content.strip())
+        ProductItem(product_id=product_id, content=encrypt_text(content.strip()))
         for content in contents
         if content.strip()
     ]
@@ -417,6 +418,8 @@ async def finalize_reserved_stock(
         item.reserved_until = None
         await session.commit()
         await session.refresh(item)
+        # Dekripsi konten sebelum digunakan di fulfillment
+        item.content = decrypt_text(item.content)
 
     return item
 

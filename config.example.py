@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     BOT_TOKEN: str = "YOUR_TELEGRAM_BOT_TOKEN"
     ADMIN_ID: int = 606533609
     
+    # Security: Database AES-256 Encryption Key
+    ENCRYPTION_KEY: str = "AeternumSecretKey2026AES256SecureSalt"
+
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/aeternum_premiapp_db"
     

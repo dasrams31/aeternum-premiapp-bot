@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     BOT_TOKEN: str = os.getenv("BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
     ADMIN_ID: int = int(os.getenv("ADMIN_ID", "606533609"))
 
+    # Security: Database Encryption Key (AES-256 Fernet)
+    ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "AeternumSecretKey2026AES256SecureSalt")
+
     # Database PostgreSQL
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
@@ -21,7 +24,6 @@ class Settings(BaseSettings):
 
     # Security: IP Whitelisting Webhook Gateway
     VERIFY_GATEWAY_IP: bool = os.getenv("VERIFY_GATEWAY_IP", "False").lower() in ("true", "1", "yes")
-    # Daftar IP resmi gateway dipisahkan koma (Contoh: 103.150.190.1,103.150.190.2)
     GATEWAY_ALLOWED_IPS: str = os.getenv("GATEWAY_ALLOWED_IPS", "")
 
     # Channel Testimoni (Username @channel atau ID)

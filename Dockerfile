@@ -12,8 +12,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Create non-root system user for security hardening
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+
 # Copy application source code
 COPY . .
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
 
 # Expose webhook port
 EXPOSE 8000
