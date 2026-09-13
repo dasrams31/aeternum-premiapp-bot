@@ -20,6 +20,7 @@ from bot.keyboards.user_kb import (
     wallet_menu_kb,
 )
 from bot.services.fulfillment import deliver_purchased_product
+from webhook.gateway import get_payment_gateway
 
 router = Router(name="wallet_router")
 
@@ -161,7 +162,23 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
     invoice_id = f"TOPUP-{timestamp}-{user.id % 10000:04d}"
     expired_at = datetime.utcnow() + timedelta(minutes=15)
 
-    mock_qris = f"00020101021226670016ID.CO.QRIS.WWW01189360000000000000000215{invoice_id}520458125303360540{int(amount)}5802ID5914AETERNUM TOPUP6007JAKARTA6304"
+    gateway = get_payment_gateway()
+    gw_res = await gateway.create_qris_transaction(
+        merchant_ref=invoice_id,
+        amount=int(amount),
+        customer_name=user.first_name or "Pembeli",
+        description=f"Top Up Saldo #{invoice_id}",
+    )
+
+    qris_payload = ""
+    gateway_ref = None
+
+    if gw_res:
+        qris_payload = gw_res.get("qris_string") or ""
+        gateway_ref = gw_res.get("invoice_id")
+
+    if not qris_payload:
+        qris_payload = f"00020101021226670016ID.CO.QRIS.WWW01189360000000000000000215{invoice_id}520458125303360540{int(amount)}5802ID5914AETERNUM TOPUP6007JAKARTA6304"
 
     trx = await crud.create_transaction(
         session=session,
@@ -169,7 +186,8 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
         user_id=user.id,
         amount=amount,
         trx_type="TOPUP",
-        qris_string=mock_qris,
+        qris_string=qris_payload,
+        gateway_reference=gateway_ref,
         expired_at=expired_at,
     )
 
@@ -184,7 +202,7 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
         f"📌 <i>Scan QRIS di atas untuk menyelesaikan pengisian saldo. Saldo akan otomatis masuk ke akun Anda.</i>"
     )
 
-    qr_file = generate_qr_image(mock_qris)
+    qr_file = generate_qr_image(qris_payload)
     if callback.message:
         await callback.message.delete()
         await callback.message.answer_photo(

@@ -46,7 +46,11 @@ async def start_auto_payment_poller(bot: Bot, interval_seconds: int = 6) -> None
                     continue
 
                 for trx in pending_trxs:
-                    check_ref = trx.gateway_reference or trx.id
+                    # Hanya cek ke BAYAR GG jika memiliki gateway_reference yang valid
+                    check_ref = trx.gateway_reference
+                    if not check_ref:
+                        continue
+
                     try:
                         status_data = await gateway.check_payment_status(check_ref)
                     except Exception as e:
