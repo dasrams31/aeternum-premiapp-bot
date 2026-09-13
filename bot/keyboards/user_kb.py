@@ -2,7 +2,7 @@
 Aeternum PremiApp Bot - Keyboard Antarmuka Pengguna (User UI & MiniApp)
 """
 
-from typing import List
+from typing import List, Optional
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -10,24 +10,26 @@ from config import settings
 from database.models import Category, Product, Transaction
 
 
-def get_miniapp_url() -> str:
-    """Mendapatkan URL WebApp."""
-    base_url = settings.WEBHOOK_HOST
-    if not base_url.startswith("http"):
-        base_url = f"https://{base_url}"
-    return f"{base_url}/app"
+def get_miniapp_url() -> Optional[str]:
+    """Mendapatkan URL WebApp jika menggunakan protokol HTTPS valid."""
+    base_url = (settings.WEBHOOK_HOST or "").strip()
+    if base_url.startswith("https://"):
+        return f"{base_url.rstrip('/')}/app"
+    return None
 
 
 def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     
-    # Tombol Utama: Telegram Mini App (Web Store Modern)
-    builder.row(
-        InlineKeyboardButton(
-            text="🚀 Buka Web Store (MiniApp)",
-            web_app=WebAppInfo(url=get_miniapp_url())
+    # Tampilkan tombol MiniApp HANYA jika URL menggunakan HTTPS valid
+    miniapp_url = get_miniapp_url()
+    if miniapp_url:
+        builder.row(
+            InlineKeyboardButton(
+                text="🚀 Buka Web Store (MiniApp)",
+                web_app=WebAppInfo(url=miniapp_url)
+            )
         )
-    )
     
     builder.row(
         InlineKeyboardButton(text="🛍️ Katalog Produk", callback_data="user_catalog"),
