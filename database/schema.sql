@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS products (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 4. Tabel Stok Teks / Lisensi Unik
+-- 4. Tabel Stok Teks / Lisensi Unik (Dengan Sistem Reservasi Kunci Sementara)
 CREATE TABLE IF NOT EXISTS product_items (
     id SERIAL PRIMARY KEY,
     product_id INT REFERENCES products(id) ON DELETE CASCADE,
@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS product_items (
     is_sold BOOLEAN DEFAULT FALSE,
     sold_at TIMESTAMP WITH TIME ZONE,
     transaction_id VARCHAR(100),
+    reserved_by_trx VARCHAR(50),         -- ID Transaksi yang sedang mengunci stok
+    reserved_until TIMESTAMP WITH TIME ZONE, -- Batas waktu kunci (15 menit)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -129,6 +131,7 @@ CREATE TABLE IF NOT EXISTS warranty_tickets (
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_products_cat_active ON products(category_id, is_active);
 CREATE INDEX IF NOT EXISTS idx_product_items_stock ON product_items(product_id, is_sold);
+CREATE INDEX IF NOT EXISTS idx_product_items_reservation ON product_items(product_id, is_sold, reserved_until);
 CREATE INDEX IF NOT EXISTS idx_transactions_user_status ON transactions(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_transactions_expired ON transactions(status, expired_at);
 CREATE INDEX IF NOT EXISTS idx_warranty_tickets_user ON warranty_tickets(user_id, status);

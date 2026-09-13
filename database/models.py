@@ -121,11 +121,18 @@ class ProductItem(Base):
         Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    
+    # Status Penjualan Permanen
     is_sold: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     sold_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     transaction_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    
+    # Sistem Kunci / Reservasi Stok Sementara
+    reserved_by_trx: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
+    reserved_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -133,7 +140,7 @@ class ProductItem(Base):
     product: Mapped["Product"] = relationship("Product", back_populates="items")
 
     def __repr__(self) -> str:
-        return f"<ProductItem id={self.id} product_id={self.product_id} is_sold={self.is_sold}>"
+        return f"<ProductItem id={self.id} product_id={self.product_id} is_sold={self.is_sold} reserved_by={self.reserved_by_trx}>"
 
 
 class PromoCode(Base):
@@ -235,7 +242,7 @@ class Review(Base):
     product_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False
     )
-    rating: Mapped[int] = mapped_column(Integer, nullable=False)  # 1 to 5
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
     comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_posted_to_channel: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -263,7 +270,6 @@ class WarrantyTicket(Base):
     issue_description: Mapped[str] = mapped_column(Text, nullable=False)
     proof_file_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    # 'OPEN', 'RESOLVED', 'REJECTED'
     status: Mapped[str] = mapped_column(String(30), default="OPEN", index=True)
     admin_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     replacement_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

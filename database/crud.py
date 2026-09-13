@@ -2,9 +2,9 @@
 Aeternum PremiApp Bot - Asynchronous Database CRUD Operations
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
@@ -296,15 +296,25 @@ async def create_product(
 
 
 # ==========================================
-# 5. PRODUCT ITEM & STOCK OPERATIONS
+# 5. PRODUCT ITEM & TEMPORARY STOCK RESERVATION (LOCK)
 # ==========================================
 async def count_available_stock(
     session: AsyncSession, product_id: int
 ) -> int:
+    """
+    Menghitung stok riil yang tersedia (belum terjual dan tidak sedang dikunci reservasi orang lain).
+    """
+    now = datetime.utcnow()
     stmt = (
         select(func.count(ProductItem.id))
         .where(ProductItem.product_id == product_id)
         .where(ProductItem.is_sold.is_(False))
+        .where(
+            or_(
+                ProductItem.reserved_until.is_(None),
+                ProductItem.reserved_until < now,
+            )
+        )
     )
     result = await session.execute(stmt)
     return result.scalar_one() or 0
@@ -325,13 +335,24 @@ async def add_stock_items_bulk(
     return len(items)
 
 
-async def get_and_lock_available_item(
-    session: AsyncSession, product_id: int, transaction_id: str
+async def reserve_stock_item_atomic(
+    session: AsyncSession, product_id: int, transaction_id: str, duration_minutes: int = 15
 ) -> Optional[ProductItem]:
+    """
+    Mengunci 1 stok sementara saat user checkout (Status PENDING).
+    Stok otomatis berkurang dari display dan pembeli lain tidak bisa mengambilnya.
+    """
+    now = datetime.utcnow()
     stmt = (
         select(ProductItem)
         .where(ProductItem.product_id == product_id)
         .where(ProductItem.is_sold.is_(False))
+        .where(
+            or_(
+                ProductItem.reserved_until.is_(None),
+                ProductItem.reserved_until < now,
+            )
+        )
         .with_for_update(skip_locked=True)
         .limit(1)
     )
@@ -339,13 +360,94 @@ async def get_and_lock_available_item(
     item = result.scalar_one_or_none()
 
     if item:
-        item.is_sold = True
-        item.sold_at = datetime.utcnow()
-        item.transaction_id = transaction_id
+        item.reserved_by_trx = transaction_id
+        item.reserved_until = now + timedelta(minutes=duration_minutes)
         await session.commit()
         await session.refresh(item)
 
     return item
+
+
+async def release_reserved_stock(
+    session: AsyncSession, transaction_id: str
+) -> bool:
+    """
+    Mengembalikan stok ke status tersedia jika pembeli MEMBATALKAN pesanan atau invoice kedaluwarsa.
+    """
+    stmt = (
+        update(ProductItem)
+        .where(ProductItem.reserved_by_trx == transaction_id)
+        .where(ProductItem.is_sold.is_(False))
+        .values(reserved_by_trx=None, reserved_until=None)
+    )
+    res = await session.execute(stmt)
+    await session.commit()
+    return res.rowcount > 0
+
+
+async def finalize_reserved_stock(
+    session: AsyncSession, product_id: int, transaction_id: str
+) -> Optional[ProductItem]:
+    """
+    Mengubah status reservasi sementara menjadi TERJUAL PERMANEN (is_sold = True) saat pembayaran sukses.
+    """
+    # 1. Cari item yang sudah dikunci oleh transaksi ini
+    stmt = (
+        select(ProductItem)
+        .where(ProductItem.reserved_by_trx == transaction_id)
+        .where(ProductItem.is_sold.is_(False))
+        .with_for_update(skip_locked=True)
+        .limit(1)
+    )
+    res = await session.execute(stmt)
+    item = res.scalar_one_or_none()
+
+    # 2. Jika tidak ada yang dikunci (misal tipe produk lain atau fallback), ambil item available baru
+    if not item:
+        now = datetime.utcnow()
+        stmt_fallback = (
+            select(ProductItem)
+            .where(ProductItem.product_id == product_id)
+            .where(ProductItem.is_sold.is_(False))
+            .where(
+                or_(
+                    ProductItem.reserved_until.is_(None),
+                    ProductItem.reserved_until < now,
+                )
+            )
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+        res_fallback = await session.execute(stmt_fallback)
+        item = res_fallback.scalar_one_or_none()
+
+    if item:
+        item.is_sold = True
+        item.sold_at = datetime.utcnow()
+        item.transaction_id = transaction_id
+        item.reserved_by_trx = None
+        item.reserved_until = None
+        await session.commit()
+        await session.refresh(item)
+
+    return item
+
+
+async def release_all_expired_reservations(session: AsyncSession) -> int:
+    """
+    Background Janitor: Mengembalikan semua stok yang masa kuncinya sudah lewat 15 menit.
+    """
+    now = datetime.utcnow()
+    stmt = (
+        update(ProductItem)
+        .where(ProductItem.is_sold.is_(False))
+        .where(ProductItem.reserved_until.is_not(None))
+        .where(ProductItem.reserved_until < now)
+        .values(reserved_by_trx=None, reserved_until=None)
+    )
+    res = await session.execute(stmt)
+    await session.commit()
+    return res.rowcount or 0
 
 
 # ==========================================

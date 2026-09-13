@@ -1,6 +1,6 @@
 """
 Aeternum PremiApp Bot - Automated Fulfillment & Commission Engine
-Pengiriman produk instan, pencatatan promo, pembagian komisi, dan prompt ulasan.
+Pengiriman produk instan, finalisasi stok terjual permanen, pembagian komisi & review.
 """
 
 import logging
@@ -23,17 +23,17 @@ async def deliver_purchased_product(
 ) -> bool:
     """
     Mengirimkan produk yang berhasil dibayar ke chat pembeli secara otomatis,
-    mencatat promo, membagikan komisi referral, dan mengirimkan prompt ulasan.
+    mengubah stok reserved menjadi TERJUAL PERMANEN, mencatat promo, dan membagikan komisi.
     """
     user_id = transaction.user_id
     delivered_text = ""
 
     try:
         # ==========================================
-        # 1. TIPE: TEXT_STOCK (Akun / Serial Key Unik)
+        # 1. TIPE: TEXT_STOCK (Finalisasi Kunci Stok ke Terjual)
         # ==========================================
         if product.product_type == "TEXT_STOCK":
-            item = await crud.get_and_lock_available_item(
+            item = await crud.finalize_reserved_stock(
                 session=session,
                 product_id=product.id,
                 transaction_id=transaction.id,
@@ -73,7 +73,7 @@ async def deliver_purchased_product(
             )
 
         # ==========================================
-        # 2. TIPE: TEXT_STATIC (Template / Prompt / Link)
+        # 2. TIPE: TEXT_STATIC
         # ==========================================
         elif product.product_type == "TEXT_STATIC":
             delivered_text = product.text_content or "Tidak ada teks konten."
@@ -96,7 +96,7 @@ async def deliver_purchased_product(
             )
 
         # ==========================================
-        # 3. TIPE: FILE (PDF / ZIP / Dokumen)
+        # 3. TIPE: FILE
         # ==========================================
         elif product.product_type == "FILE":
             if not product.telegram_file_id:
@@ -120,7 +120,7 @@ async def deliver_purchased_product(
             delivered_text = f"FILE:{product.telegram_file_id}"
 
         # ==========================================
-        # 4. TIPE: INVITE_LINK (Channel / Grup VIP)
+        # 4. TIPE: INVITE_LINK
         # ==========================================
         elif product.product_type == "INVITE_LINK":
             if not product.vip_chat_id:
