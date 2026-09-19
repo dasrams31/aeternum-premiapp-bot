@@ -161,3 +161,5 @@ sudo bash scripts/install.sh
 ## 👤 Kontak & Pengembang
 - **Owner & Admin Utama**: [@dasrams](https://t.me/dasrams)
 - **Live Bot Telegram**: [@aeternum_premibot](https://t.me/aeternum_premibot)
+
+<!-- Aeternum License Management Suite v2.0 -->
