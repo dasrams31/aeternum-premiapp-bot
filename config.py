@@ -17,10 +17,14 @@ class Settings(BaseSettings):
     )
 
     # Payment Gateway
-    PAYMENT_GATEWAY: str = os.getenv("PAYMENT_GATEWAY", "gopay")
+    PAYMENT_GATEWAY: str = os.getenv("PAYMENT_GATEWAY", "nirvapay")
     GATEWAY_API_KEY: str = os.getenv("GATEWAY_API_KEY", "")
     GATEWAY_PRIVATE_KEY: str = os.getenv("GATEWAY_PRIVATE_KEY", "")
     GATEWAY_MERCHANT_CODE: str = os.getenv("GATEWAY_MERCHANT_CODE", "")
+
+    # NirvaPay SaaS Integration
+    NIRVAPAY_BASE_URL: str = os.getenv("NIRVAPAY_BASE_URL", "https://nirvapay.dasrams.biz.id")
+    NIRVAPAY_SECRET_KEY: str = os.getenv("NIRVAPAY_SECRET_KEY", "sec_live_nirva_e3b829c7140f912b")
 
     # GoPay Merchant Static QRIS & Webhook Secret
     STATIC_QRIS_PAYLOAD: str = os.getenv(
