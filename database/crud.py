@@ -751,6 +751,23 @@ async def get_transaction_by_id(
     return result.scalar_one_or_none()
 
 
+async def get_pending_transaction_by_exact_amount(
+    session: AsyncSession, amount: float
+) -> Optional[Transaction]:
+    """Mencari transaksi PENDING yang belum expired dengan nominal yang cocok."""
+    now = datetime.utcnow()
+    stmt = (
+        select(Transaction)
+        .where(Transaction.status == "PENDING")
+        .where(Transaction.amount == amount)
+        .where(Transaction.expired_at > now)
+        .order_by(Transaction.created_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def mark_transaction_paid(
     session: AsyncSession,
     transaction_id: str,

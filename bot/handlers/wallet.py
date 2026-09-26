@@ -22,6 +22,11 @@ from bot.keyboards.user_kb import (
     wallet_menu_kb,
 )
 from bot.services.fulfillment import deliver_purchased_product
+from bot.services.qris import (
+    find_available_unique_amount,
+    generate_qr_input_file,
+    make_dynamic_qris,
+)
 from webhook.gateway import get_payment_gateway
 
 logger = logging.getLogger(__name__)
@@ -34,14 +39,7 @@ class TopUpState(StatesGroup):
 
 def generate_qr_image(payload: str) -> BufferedInputFile:
     """Generate gambar QR Code dari string QRIS dinamis."""
-    qr = qrcode.QRCode(version=None, box_size=10, border=2)
-    qr.add_data(payload)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    img_byte_arr = io.BytesIO()
-    img.save(img_byte_arr, format="PNG")
-    img_byte_arr.seek(0)
-    return BufferedInputFile(img_byte_arr.getvalue(), filename="topup_qris.png")
+    return generate_qr_input_file(payload, filename="topup_qris.png")
 
 
 @router.callback_query(F.data == "user_wallet")
@@ -130,6 +128,10 @@ async def process_custom_amount(
 
     # Request Real QRIS ke Payment Gateway
     gateway = get_payment_gateway()
+    from config import settings
+    if (settings.PAYMENT_GATEWAY or "").lower() in ["gopay", "manual_gopay", ""]:
+        amount = await find_available_unique_amount(session=session, base_amount=int(amount))
+
     customer_name = message.from_user.first_name if message.from_user else "Pembeli"
     gw_res = await gateway.create_qris_transaction(
         merchant_ref=invoice_id,
@@ -146,7 +148,7 @@ async def process_custom_amount(
         gateway_ref = gw_res.get("invoice_id")
 
     if not qris_payload:
-        qris_payload = f"00020101021226670016ID.CO.QRIS.WWW01189360000000000000000215{invoice_id}520458125303360540{int(amount)}5802ID5914AETERNUM TOPUP6007JAKARTA6304"
+        qris_payload = make_dynamic_qris(amount=int(amount))
 
     trx = await crud.create_transaction(
         session=session,
@@ -164,10 +166,13 @@ async def process_custom_amount(
         f"🧾 <b>INVOICE TOP UP SALDO QRIS</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🆔 <b>No. Invoice:</b> <code>{invoice_id}</code>\n"
-        f"💵 <b>Nominal Top Up:</b> <code>{fmt_amount}</code>\n"
+        f"💵 <b>Nominal Transfer:</b> <code>{fmt_amount}</code>\n"
         f"⏰ <b>Batas Waktu:</b> 15 Menit\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📌 <i>Scan QRIS di atas untuk menyelesaikan pengisian saldo. Saldo akan otomatis bertambah ke akun Anda dalam hitungan detik setelah pembayaran berhasil.</i>"
+        f"📌 <b>PETUNJUK:</b>\n"
+        f"1. Scan kode QR di atas.\n"
+        f"2. Transfer <b>TEPAT {fmt_amount}</b> (termasuk kode unik).\n"
+        f"3. Saldo akan otomatis bertambah ke akun Anda dalam hitungan detik setelah pembayaran berhasil."
     )
 
     qr_file = generate_qr_image(qris_payload)
@@ -191,6 +196,10 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
     expired_at = datetime.utcnow() + timedelta(minutes=15)
 
     gateway = get_payment_gateway()
+    from config import settings
+    if (settings.PAYMENT_GATEWAY or "").lower() in ["gopay", "manual_gopay", ""]:
+        amount = await find_available_unique_amount(session=session, base_amount=int(amount))
+
     gw_res = await gateway.create_qris_transaction(
         merchant_ref=invoice_id,
         amount=int(amount),
@@ -206,7 +215,7 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
         gateway_ref = gw_res.get("invoice_id")
 
     if not qris_payload:
-        qris_payload = f"00020101021226670016ID.CO.QRIS.WWW01189360000000000000000215{invoice_id}520458125303360540{int(amount)}5802ID5914AETERNUM TOPUP6007JAKARTA6304"
+        qris_payload = make_dynamic_qris(amount=int(amount))
 
     trx = await crud.create_transaction(
         session=session,
@@ -224,10 +233,13 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
         f"🧾 <b>INVOICE TOP UP SALDO QRIS</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🆔 <b>No. Invoice:</b> <code>{invoice_id}</code>\n"
-        f"💵 <b>Nominal Top Up:</b> <code>{fmt_amount}</code>\n"
+        f"💵 <b>Nominal Transfer:</b> <code>{fmt_amount}</code>\n"
         f"⏰ <b>Batas Waktu:</b> 15 Menit\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📌 <i>Scan QRIS di atas untuk menyelesaikan pengisian saldo. Saldo akan otomatis masuk ke akun Anda.</i>"
+        f"📌 <b>PETUNJUK:</b>\n"
+        f"1. Scan kode QR di atas.\n"
+        f"2. Transfer <b>TEPAT {fmt_amount}</b> (termasuk kode unik).\n"
+        f"3. Saldo akan otomatis bertambah ke akun Anda dalam hitungan detik setelah pembayaran berhasil."
     )
 
     qr_file = generate_qr_image(qris_payload)

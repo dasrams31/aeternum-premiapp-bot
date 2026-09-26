@@ -174,8 +174,43 @@ class TripayGateway:
             return None
 
 
+class GoPayDirectGateway:
+    """
+    Direct Merchant QRIS GoPay Engine dengan kalkulasi dynamic EMVCo & CRC16.
+    Tidak memerlukan API pihak ketiga; nominal diinjeksi langsung ke raw QRIS payload.
+    """
+
+    def __init__(self) -> None:
+        self.static_payload = getattr(settings, "STATIC_QRIS_PAYLOAD", "")
+
+    def verify_webhook_signature(self, *args, **kwargs) -> bool:
+        return True
+
+    async def create_qris_transaction(
+        self,
+        merchant_ref: str,
+        amount: int,
+        customer_name: str = "Customer",
+        description: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        from bot.services.qris import make_dynamic_qris
+        dynamic_payload = make_dynamic_qris(amount=int(amount), static_qris=self.static_payload)
+        return {
+            "invoice_id": merchant_ref,
+            "qris_string": dynamic_payload,
+            "amount": amount,
+            "payment_url": None,
+            "method": "gopay_qris",
+        }
+
+    async def check_payment_status(self, invoice_id: str) -> Optional[Dict[str, Any]]:
+        return None
+
+
 def get_payment_gateway():
-    gw = settings.PAYMENT_GATEWAY.lower()
+    gw = (settings.PAYMENT_GATEWAY or "gopay").lower()
     if gw in ["bayargg", "bayar_gg", "bayar"]:
         return BayarGGGateway()
-    return TripayGateway()
+    elif gw in ["tripay"]:
+        return TripayGateway()
+    return GoPayDirectGateway()

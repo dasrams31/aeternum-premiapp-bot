@@ -16,6 +16,11 @@ from config import settings
 from database import crud
 from bot.keyboards.user_kb import back_to_main_kb, invoice_kb
 from bot.services.fulfillment import deliver_purchased_product
+from bot.services.qris import (
+    find_available_unique_amount,
+    generate_qr_input_file,
+    make_dynamic_qris,
+)
 from webhook.gateway import get_payment_gateway
 
 logger = logging.getLogger(__name__)
@@ -23,14 +28,7 @@ router = Router(name="order_router")
 
 
 def generate_qr_image(payload: str) -> BufferedInputFile:
-    qr = qrcode.QRCode(version=1, box_size=10, border=2)
-    qr.add_data(payload)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    img_byte_arr = io.BytesIO()
-    img.save(img_byte_arr, format="PNG")
-    img_byte_arr.seek(0)
-    return BufferedInputFile(img_byte_arr.getvalue(), filename="qris_payment.png")
+    return generate_qr_input_file(payload, filename="qris_payment.png")
 
 
 @router.callback_query(F.data.startswith("buy_"))
@@ -70,8 +68,12 @@ async def cb_create_order(
             )
             return
 
-    # 2. REQUEST QRIS DINAMIS KE PAYMENT GATEWAY (BAYAR GG / TRIPAY)
+    # 2. REQUEST QRIS DINAMIS KE PAYMENT GATEWAY
     gateway = get_payment_gateway()
+    if (settings.PAYMENT_GATEWAY or "").lower() in ["gopay", "manual_gopay", ""]:
+        # Terapkan kode unik agar mutasi dapat dicocokkan otomatis
+        final_amount = await find_available_unique_amount(session=session, base_amount=int(final_amount))
+
     gw_res = await gateway.create_qris_transaction(
         merchant_ref=invoice_id,
         amount=int(final_amount),
@@ -90,7 +92,7 @@ async def cb_create_order(
 
     # Fallback string jika gateway offline
     if not qris_payload:
-        qris_payload = f"00020101021226670016ID.CO.QRIS.WWW01189360000000000000000215{invoice_id}520458125303360540{int(final_amount)}5802ID5914AETERNUM STORE6007JAKARTA6304"
+        qris_payload = make_dynamic_qris(amount=int(final_amount))
 
     # Simpan transaksi ke database
     trx = await crud.create_transaction(
@@ -122,8 +124,8 @@ async def cb_create_order(
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📌 <b>PETUNJUK PEMBAYARAN:</b>\n"
         f"1. Scan kode QR di atas menggunakan GoPay / OVO / DANA / BCA / Livin / ShopeePay.\n"
-        f"2. Pastikan nominal transfer sesuai dengan total tagihan.\n"
-        f"3. Setelah transfer berhasil, sistem akan mendeteksi pembayaran secara otomatis.\n"
+        f"2. Pastikan nominal transfer <b>TEPAT {formatted_price}</b> (termasuk kode unik).\n"
+        f"3. Pembayaran akan terkonfirmasi secara <b>OTOMATIS</b> dalam hitungan detik.\n"
         f"4. Atau tekan tombol <b>🔄 Cek Status Pembayaran</b> di bawah ini.\n"
     )
 

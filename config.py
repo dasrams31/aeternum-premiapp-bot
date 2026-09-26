@@ -17,10 +17,17 @@ class Settings(BaseSettings):
     )
 
     # Payment Gateway
-    PAYMENT_GATEWAY: str = os.getenv("PAYMENT_GATEWAY", "tripay")
+    PAYMENT_GATEWAY: str = os.getenv("PAYMENT_GATEWAY", "gopay")
     GATEWAY_API_KEY: str = os.getenv("GATEWAY_API_KEY", "")
     GATEWAY_PRIVATE_KEY: str = os.getenv("GATEWAY_PRIVATE_KEY", "")
     GATEWAY_MERCHANT_CODE: str = os.getenv("GATEWAY_MERCHANT_CODE", "")
+
+    # GoPay Merchant Static QRIS & Webhook Secret
+    STATIC_QRIS_PAYLOAD: str = os.getenv(
+        "STATIC_QRIS_PAYLOAD",
+        "00020101021126610014COM.GO-JEK.WWW01189360091433293320900210G3293320900303UMI51440014ID.CO.QRIS.WWW0215ID10265450816590303UMI5204899953033605802ID5925Aeternum Kreasikan Bersam6006SLEMAN61055558462140703A0111036216304D2F5",
+    )
+    GOPAY_WEBHOOK_SECRET: str = os.getenv("GOPAY_WEBHOOK_SECRET", "AeternumGoBiz2026Secret")
 
     # Security: IP Whitelisting Webhook Gateway
     VERIFY_GATEWAY_IP: bool = os.getenv("VERIFY_GATEWAY_IP", "False").lower() in ("true", "1", "yes")

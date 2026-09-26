@@ -25,6 +25,11 @@ from database.connection import async_session
 from database.models import Category, Product, PromoCode, Transaction, User
 from bot.services.auth import validate_telegram_init_data
 from bot.services.fulfillment import deliver_purchased_product
+from bot.services.qris import (
+    find_available_unique_amount,
+    generate_qr_image_bytes,
+    make_dynamic_qris,
+)
 from webhook.gateway import BayarGGGateway, TripayGateway, get_payment_gateway
 
 logger = logging.getLogger("aeternum_webhook")
@@ -232,18 +237,24 @@ async def api_create_order(
                 raise HTTPException(status_code=400, detail="Minimal top up Rp 5.000")
 
             invoice_id = f"TOPUP-{timestamp}-{user.id % 10000:04d}"
-            mock_qris = f"00020101021226670016ID.CO.QRIS.WWW01189360000000000000000215{invoice_id}520458125303360540{int(req.amount)}5802ID5914AETERNUM TOPUP6007JAKARTA6304"
+            final_topup_amount = await find_available_unique_amount(session=session, base_amount=int(req.amount))
+            dynamic_qris = make_dynamic_qris(amount=int(final_topup_amount))
 
             await crud.create_transaction(
                 session=session,
                 invoice_id=invoice_id,
                 user_id=user.id,
-                amount=req.amount,
+                amount=final_topup_amount,
                 trx_type="TOPUP",
-                qris_string=mock_qris,
+                qris_string=dynamic_qris,
                 expired_at=expired_at,
             )
-            return {"success": True, "invoice_id": invoice_id}
+            return {
+                "success": True,
+                "invoice_id": invoice_id,
+                "amount": final_topup_amount,
+                "qris_string": dynamic_qris,
+            }
 
         # ==========================================
         # 2. PEMBELIAN PRODUK DIGITAL
@@ -255,12 +266,12 @@ async def api_create_order(
         if not product or not product.is_active:
             raise HTTPException(status_code=404, detail="Produk tidak ditemukan atau nonaktif")
 
-        final_price = float(product.price) - req.discount_amount
+        base_price = float(product.price) - req.discount_amount
 
         # Opsi A: Bayar Pakai Saldo Internal
         if req.payment_method == "BALANCE":
             deducted = await crud.deduct_user_balance_atomic(
-                session=session, user_id=user.id, amount=final_price
+                session=session, user_id=user.id, amount=base_price
             )
             if not deducted:
                 return {"success": False, "message": "Saldo tidak mencukupi"}
@@ -271,7 +282,7 @@ async def api_create_order(
                 invoice_id=invoice_id,
                 user_id=user.id,
                 product_id=product.id,
-                amount=final_price,
+                amount=base_price,
                 original_amount=float(product.price),
                 discount_amount=req.discount_amount,
                 promo_code=req.promo_code,
@@ -284,7 +295,7 @@ async def api_create_order(
                 )
             return {"success": True, "invoice_id": invoice_id, "paid": True}
 
-        # Opsi B: Bayar via QRIS
+        # Opsi B: Bayar via QRIS Dinamis
         invoice_id = f"AP-{timestamp}-{user.id % 10000:04d}"
 
         # Reserve stock if TEXT_STOCK
@@ -298,7 +309,8 @@ async def api_create_order(
             if not reserved:
                 return {"success": False, "message": "Stok produk baru saja habis!"}
 
-        mock_qris = f"00020101021226670016ID.CO.QRIS.WWW01189360000000000000000215{invoice_id}520458125303360540{int(final_price)}5802ID5914AETERNUM STORE6007JAKARTA6304"
+        final_price = await find_available_unique_amount(session=session, base_amount=int(base_price))
+        dynamic_qris = make_dynamic_qris(amount=int(final_price))
 
         await crud.create_transaction(
             session=session,
@@ -309,11 +321,17 @@ async def api_create_order(
             original_amount=float(product.price),
             discount_amount=req.discount_amount,
             promo_code=req.promo_code,
-            qris_string=mock_qris,
+            qris_string=dynamic_qris,
             expired_at=expired_at,
         )
 
-        return {"success": True, "invoice_id": invoice_id, "paid": False}
+        return {
+            "success": True,
+            "invoice_id": invoice_id,
+            "paid": False,
+            "amount": final_price,
+            "qris_string": dynamic_qris,
+        }
 
 
 # ==============================================================================
@@ -552,3 +570,202 @@ async def handle_payment_webhook(
                 logger.error(f"Gagal mengirim notifikasi admin: {e}")
 
     return JSONResponse(content={"success": True})
+
+
+# ==============================================================================
+# 5. GOPAY MERCHANT NOTIFICATION / MUTATION WEBHOOK
+# ==============================================================================
+@app.post("/webhook/gopay")
+@app.post("/api/webhook/gopay-mutation")
+async def handle_gopay_mutation_webhook(
+    request: Request,
+    x_secret_key: Optional[str] = Header(None, alias="X-Secret-Key"),
+    x_gobiz_secret: Optional[str] = Header(None, alias="X-GoBiz-Secret"),
+):
+    """
+    Webhook receiver untuk notifikasi mutasi GoBiz / GoPay QRIS dari Android forwarder (MacroDroid / Tasker / Webhook Forwarder).
+    Mendukung format JSON terstruktur maupun teks mentah notifikasi Android.
+    """
+    import re
+    import hmac
+
+    raw_body = await request.body()
+    body_str = raw_body.decode("utf-8", errors="ignore")
+
+    data = {}
+    try:
+        data = json.loads(body_str)
+    except Exception:
+        data = {}
+
+    # Validasi Secret Key jika dikonfigurasi
+    configured_secret = getattr(settings, "GOPAY_WEBHOOK_SECRET", "")
+    if configured_secret:
+        received_secret = (
+            x_secret_key
+            or x_gobiz_secret
+            or (data.get("secret") if isinstance(data, dict) else None)
+            or (data.get("key") if isinstance(data, dict) else None)
+        )
+        if received_secret and not hmac.compare_digest(configured_secret, received_secret):
+            logger.warning("🚨 [GOPAY WEBHOOK] Secret key TIDAK VALID!")
+            raise HTTPException(status_code=403, detail="Invalid secret key")
+
+    extracted_amount: Optional[int] = None
+
+    # 1. Coba ambil direct amount dari JSON field
+    if isinstance(data, dict) and data.get("amount") is not None:
+        try:
+            amt_val = str(data.get("amount")).replace(".", "").replace(",", "").replace("Rp", "").strip()
+            extracted_amount = int(float(amt_val))
+        except (ValueError, TypeError):
+            pass
+
+    # 2. Jika tidak ada field amount, parse dari text / title / message notifikasi
+    if extracted_amount is None:
+        text_to_search = ""
+        if isinstance(data, dict):
+            text_to_search = f"{data.get('title', '')} {data.get('text', '')} {data.get('message', '')} {data.get('notification', '')}"
+        else:
+            text_to_search = body_str
+
+        matches = re.findall(r"(?:Rp\.?\s*|sebesar\s*Rp\.?\s*|IDR\s*)([\d\.,]+)", text_to_search, re.IGNORECASE)
+        if matches:
+            clean_str = matches[0].replace(".", "").replace(",", "")
+            try:
+                extracted_amount = int(clean_str)
+            except ValueError:
+                pass
+
+    if not extracted_amount or extracted_amount <= 0:
+        logger.warning(f"[GOPAY WEBHOOK] Gagal mengekstrak nominal dari payload: {body_str}")
+        return JSONResponse(
+            content={"success": False, "message": "Nominal pembayaran tidak ditemukan dalam payload"},
+            status_code=400,
+        )
+
+    logger.info(f"💳 [GOPAY WEBHOOK] Deteksi pembayaran masuk: Rp {extracted_amount:,.0f}")
+
+    async with async_session() as session:
+        # Cari transaksi PENDING yang cocok dengan nominal persis
+        trx = await crud.get_pending_transaction_by_exact_amount(session=session, amount=float(extracted_amount))
+        if not trx:
+            logger.warning(f"⚠️ [GOPAY WEBHOOK] Tidak ada transaksi PENDING untuk nominal Rp {extracted_amount:,.0f}")
+            return JSONResponse(
+                content={
+                    "success": True,
+                    "matched": False,
+                    "amount": extracted_amount,
+                    "message": "No pending invoice matched this amount",
+                }
+            )
+
+        formatted_amount = f"Rp {trx.amount:,.0f}".replace(",", ".")
+
+        # A. Top Up Saldo
+        if trx.trx_type == "TOPUP":
+            await crud.add_user_balance(session=session, user_id=trx.user_id, amount=float(trx.amount))
+            await crud.mark_transaction_paid(session=session, transaction_id=trx.id, delivered_content=f"TOPUP:{trx.amount}")
+
+            if bot_instance:
+                try:
+                    await bot_instance.send_message(
+                        chat_id=trx.user_id,
+                        text=(
+                            f"🎉 <b>TOP UP SALDO OTOMATIS BERHASIL!</b>\n\n"
+                            f"🧾 <b>No. Invoice:</b> <code>{trx.id}</code>\n"
+                            f"➕ <b>Nominal Masuk:</b> <code>+{formatted_amount}</code>\n\n"
+                            f"Saldo Anda telah aktif dan siap digunakan untuk berbelanja produk digital secara instan!"
+                        ),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+
+                try:
+                    admin_notif = (
+                        f"💰 <b>NOTIFIKASI GOPAY: TOP UP SALDO MASUK!</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🆔 <b>Invoice:</b> <code>#{trx.id}</code>\n"
+                        f"💵 <b>Nominal:</b> <code>{formatted_amount}</code>\n"
+                        f"👤 <b>User ID:</b> <code>{trx.user_id}</code>\n"
+                        f"⚡ <b>Gateway:</b> GoPay Dynamic QRIS\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━"
+                    )
+                    await bot_instance.send_message(
+                        chat_id=settings.ADMIN_ID,
+                        text=admin_notif,
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+
+            return JSONResponse(
+                content={
+                    "success": True,
+                    "matched": True,
+                    "invoice_id": trx.id,
+                    "type": "TOPUP",
+                    "amount": extracted_amount,
+                }
+            )
+
+        # B. Pembelian Produk Digital
+        if not trx.product_id:
+            logger.error(f"Transaksi #{trx.id} tidak memiliki product_id!")
+            return JSONResponse(content={"success": False, "message": "Transaction missing product_id"}, status_code=400)
+
+        product = await crud.get_product_by_id(session=session, product_id=trx.product_id)
+        if not product:
+            logger.error(f"Produk #{trx.product_id} tidak ditemukan!")
+            return JSONResponse(content={"success": False, "message": "Product not found"}, status_code=404)
+
+        if bot_instance:
+            delivered = await deliver_purchased_product(
+                bot=bot_instance,
+                session=session,
+                transaction=trx,
+                product=product,
+            )
+
+            try:
+                admin_notif_text = (
+                    f"💰 <b>NOTIFIKASI GOPAY: PEMBELIAN MASUK!</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🆔 <b>Invoice:</b> <code>#{trx.id}</code>\n"
+                    f"📦 <b>Produk:</b> {product.name}\n"
+                    f"💵 <b>Nominal:</b> <code>{formatted_amount}</code>\n"
+                    f"👤 <b>Pembeli ID:</b> <code>{trx.user_id}</code>\n"
+                    f"⚡ <b>Gateway:</b> GoPay Dynamic QRIS\n"
+                    f"✅ <b>Status Pengiriman:</b> {'Terkirim Otomatis' if delivered else 'Perlu Pengecekan'}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"<i>Sistem otomatis Aeternum PremiApp Bot</i>"
+                )
+                await bot_instance.send_message(
+                    chat_id=settings.ADMIN_ID,
+                    text=admin_notif_text,
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.error(f"Gagal mengirim notifikasi admin: {e}")
+
+        return JSONResponse(
+            content={
+                "success": True,
+                "matched": True,
+                "invoice_id": trx.id,
+                "type": "PURCHASE",
+                "amount": extracted_amount,
+            }
+        )
+
+
+# ==============================================================================
+# 6. DYNAMIC QRIS GENERATOR API (PNG / JSON)
+# ==============================================================================
+@app.get("/api/qris/dynamic")
+async def api_get_dynamic_qris(amount: int = Query(..., gt=0)):
+    """Menghasilkan string dynamic QRIS dan PNG preview."""
+    dynamic_payload = make_dynamic_qris(amount=amount)
+    qr_buf = generate_qr_image_bytes(dynamic_payload)
+    return Response(content=qr_buf.getvalue(), media_type="image/png")
