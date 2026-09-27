@@ -237,8 +237,35 @@ async def api_create_order(
                 raise HTTPException(status_code=400, detail="Minimal top up Rp 5.000")
 
             invoice_id = f"TOPUP-{timestamp}-{user.id % 10000:04d}"
-            final_topup_amount = await find_available_unique_amount(session=session, base_amount=int(req.amount))
-            dynamic_qris = make_dynamic_qris(amount=int(final_topup_amount))
+            gateway = get_payment_gateway()
+            topup_amt = int(req.amount)
+            if (settings.PAYMENT_GATEWAY or "").lower() in ["gopay", "manual_gopay", ""]:
+                final_topup_amount = await find_available_unique_amount(session=session, base_amount=topup_amt)
+            else:
+                final_topup_amount = topup_amt
+
+            gw_res = await gateway.create_qris_transaction(
+                merchant_ref=invoice_id,
+                amount=int(final_topup_amount),
+                customer_name=user.first_name or "Pembeli",
+                description=f"Top Up Saldo #{invoice_id}",
+            )
+
+            qris_payload = ""
+            gateway_ref = None
+            qris_url = None
+            qris_image = None
+
+            if gw_res:
+                qris_payload = gw_res.get("qris_string") or ""
+                gateway_ref = gw_res.get("invoice_id")
+                qris_url = gw_res.get("qris_url")
+                qris_image = gw_res.get("qris_image")
+                if gw_res.get("amount"):
+                    final_topup_amount = float(gw_res["amount"])
+
+            if not qris_payload and not qris_image:
+                qris_payload = make_dynamic_qris(amount=int(final_topup_amount))
 
             await crud.create_transaction(
                 session=session,
@@ -246,14 +273,18 @@ async def api_create_order(
                 user_id=user.id,
                 amount=final_topup_amount,
                 trx_type="TOPUP",
-                qris_string=dynamic_qris,
+                qris_string=qris_payload,
+                qris_image_url=qris_url,
+                gateway_reference=gateway_ref,
                 expired_at=expired_at,
             )
             return {
                 "success": True,
                 "invoice_id": invoice_id,
                 "amount": final_topup_amount,
-                "qris_string": dynamic_qris,
+                "qris_string": qris_payload,
+                "qris_url": qris_url,
+                "qris_image": qris_image,
             }
 
         # ==========================================
@@ -309,8 +340,34 @@ async def api_create_order(
             if not reserved:
                 return {"success": False, "message": "Stok produk baru saja habis!"}
 
-        final_price = await find_available_unique_amount(session=session, base_amount=int(base_price))
-        dynamic_qris = make_dynamic_qris(amount=int(final_price))
+        gateway = get_payment_gateway()
+        if (settings.PAYMENT_GATEWAY or "").lower() in ["gopay", "manual_gopay", ""]:
+            final_price = await find_available_unique_amount(session=session, base_amount=int(base_price))
+        else:
+            final_price = base_price
+
+        gw_res = await gateway.create_qris_transaction(
+            merchant_ref=invoice_id,
+            amount=int(final_price),
+            customer_name=user.first_name or "Pembeli",
+            description=f"Order #{invoice_id} - {product.name}",
+        )
+
+        qris_payload = ""
+        gateway_ref = None
+        qris_url = None
+        qris_image = None
+
+        if gw_res:
+            qris_payload = gw_res.get("qris_string") or ""
+            gateway_ref = gw_res.get("invoice_id")
+            qris_url = gw_res.get("qris_url")
+            qris_image = gw_res.get("qris_image")
+            if gw_res.get("amount"):
+                final_price = float(gw_res["amount"])
+
+        if not qris_payload and not qris_image:
+            qris_payload = make_dynamic_qris(amount=int(final_price))
 
         await crud.create_transaction(
             session=session,
@@ -321,7 +378,9 @@ async def api_create_order(
             original_amount=float(product.price),
             discount_amount=req.discount_amount,
             promo_code=req.promo_code,
-            qris_string=dynamic_qris,
+            qris_string=qris_payload,
+            qris_image_url=qris_url,
+            gateway_reference=gateway_ref,
             expired_at=expired_at,
         )
 
@@ -330,7 +389,9 @@ async def api_create_order(
             "invoice_id": invoice_id,
             "paid": False,
             "amount": final_price,
-            "qris_string": dynamic_qris,
+            "qris_string": qris_payload,
+            "qris_url": qris_url,
+            "qris_image": qris_image,
         }
 
 
@@ -413,6 +474,7 @@ async def api_admin_export_csv(user_id: int = Query(...)):
 # 4. PAYMENT GATEWAY WEBHOOK LISTENER
 # ==============================================================================
 @app.post("/webhook/payment")
+@app.post("/webhook/klikqris")
 async def handle_payment_webhook(
     request: Request,
     x_webhook_signature: str | None = Header(None),
@@ -433,10 +495,10 @@ async def handle_payment_webhook(
 
     # Ekstrak data invoice & status
     merchant_ref = (
-        data.get("merchant_ref")
+        data.get("order_id")
+        or data.get("merchant_ref")
         or data.get("invoice_id")
         or x_invoice_id
-        or data.get("order_id")
     )
     status = (data.get("status") or "").upper()
     callback_time = data.get("timestamp") or x_webhook_timestamp
@@ -452,13 +514,13 @@ async def handle_payment_webhook(
             pass
 
     if not merchant_ref:
-        raise HTTPException(status_code=400, detail="Missing invoice_id / merchant_ref")
+        raise HTTPException(status_code=400, detail="Missing invoice_id / merchant_ref / order_id")
 
     # Verifikasi Signature Gateway jika diatur
     gateway = get_payment_gateway()
     received_sig = x_webhook_signature or data.get("signature") or x_callback_signature
     if settings.GATEWAY_PRIVATE_KEY and received_sig:
-        final_amount = data.get("final_amount") or data.get("amount") or 0
+        final_amount = data.get("final_amount") or data.get("amount") or data.get("total_amount") or 0
         if isinstance(gateway, BayarGGGateway):
             is_valid = gateway.verify_webhook_signature(
                 invoice_id=merchant_ref,
@@ -475,7 +537,7 @@ async def handle_payment_webhook(
         if not is_valid:
             logger.warning(f"🚨 Signature Webhook TIDAK VALID dari IP: {client_ip}")
 
-    if status not in ["PAID", "SUCCESS", "SETTLEMENT"]:
+    if status not in ["PAID", "SUCCESS", "SETTLEMENT", "COMPLETED"]:
         logger.info(f"Status '{status}' diabaikan untuk order #{merchant_ref}")
         return JSONResponse(content={"success": True, "message": f"Status {status} ignored"})
 

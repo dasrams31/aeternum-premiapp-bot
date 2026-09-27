@@ -3,9 +3,11 @@ Aeternum PremiApp Bot - Wallet & Top Up Handlers
 Terintegrasi langsung dengan Payment Gateway BAYAR GG untuk Top Up Saldo Instan.
 """
 
+import base64
 from datetime import datetime, timedelta
 import io
 import logging
+from typing import Optional
 import qrcode
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
@@ -35,6 +37,30 @@ router = Router(name="wallet_router")
 
 class TopUpState(StatesGroup):
     waiting_for_custom_amount = State()
+
+
+def get_qr_buffered_file(
+    gw_res: Optional[dict],
+    fallback_payload: str,
+    fallback_amount: int,
+    filename: str = "topup_qris.png",
+) -> BufferedInputFile:
+    if gw_res:
+        qris_image_b64 = gw_res.get("qris_image")
+        if qris_image_b64:
+            if "," in qris_image_b64:
+                qris_image_b64 = qris_image_b64.split(",", 1)[1]
+            try:
+                img_bytes = base64.b64decode(qris_image_b64)
+                return BufferedInputFile(img_bytes, filename=filename)
+            except Exception as e:
+                logger.warning(f"Gagal decode base64 QR: {e}")
+        qris_string = gw_res.get("qris_string")
+        if qris_string:
+            return generate_qr_input_file(qris_string, filename=filename)
+
+    payload = fallback_payload or make_dynamic_qris(amount=int(fallback_amount))
+    return generate_qr_input_file(payload, filename=filename)
 
 
 def generate_qr_image(payload: str) -> BufferedInputFile:
@@ -142,12 +168,16 @@ async def process_custom_amount(
 
     qris_payload = ""
     gateway_ref = None
+    qris_url = None
 
     if gw_res:
         qris_payload = gw_res.get("qris_string") or ""
         gateway_ref = gw_res.get("invoice_id")
+        qris_url = gw_res.get("qris_url")
+        if gw_res.get("amount"):
+            amount = float(gw_res["amount"])
 
-    if not qris_payload:
+    if not qris_payload and not (gw_res and gw_res.get("qris_image")):
         qris_payload = make_dynamic_qris(amount=int(amount))
 
     trx = await crud.create_transaction(
@@ -157,6 +187,7 @@ async def process_custom_amount(
         amount=amount,
         trx_type="TOPUP",
         qris_string=qris_payload,
+        qris_image_url=qris_url,
         gateway_reference=gateway_ref,
         expired_at=expired_at,
     )
@@ -175,7 +206,12 @@ async def process_custom_amount(
         f"3. Saldo akan otomatis bertambah ke akun Anda dalam hitungan detik setelah pembayaran berhasil."
     )
 
-    qr_file = generate_qr_image(qris_payload)
+    qr_file = get_qr_buffered_file(
+        gw_res=gw_res,
+        fallback_payload=qris_payload,
+        fallback_amount=int(amount),
+        filename="topup_qris.png",
+    )
     sent_msg = await message.answer_photo(
         photo=qr_file,
         caption=caption,
@@ -209,12 +245,16 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
 
     qris_payload = ""
     gateway_ref = None
+    qris_url = None
 
     if gw_res:
         qris_payload = gw_res.get("qris_string") or ""
         gateway_ref = gw_res.get("invoice_id")
+        qris_url = gw_res.get("qris_url")
+        if gw_res.get("amount"):
+            amount = float(gw_res["amount"])
 
-    if not qris_payload:
+    if not qris_payload and not (gw_res and gw_res.get("qris_image")):
         qris_payload = make_dynamic_qris(amount=int(amount))
 
     trx = await crud.create_transaction(
@@ -224,6 +264,7 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
         amount=amount,
         trx_type="TOPUP",
         qris_string=qris_payload,
+        qris_image_url=qris_url,
         gateway_reference=gateway_ref,
         expired_at=expired_at,
     )
@@ -242,7 +283,12 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
         f"3. Saldo akan otomatis bertambah ke akun Anda dalam hitungan detik setelah pembayaran berhasil."
     )
 
-    qr_file = generate_qr_image(qris_payload)
+    qr_file = get_qr_buffered_file(
+        gw_res=gw_res,
+        fallback_payload=qris_payload,
+        fallback_amount=int(amount),
+        filename="topup_qris.png",
+    )
     if callback.message:
         await callback.message.delete()
         sent_msg = await callback.message.answer_photo(

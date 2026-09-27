@@ -14,6 +14,144 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 
+class KlikQRISGateway:
+    """
+    Client resmi Payment Gateway KlikQRIS (https://klikqris.com/dokumentasi).
+    Mendukung pembuatan QRIS Dinamis instan, cek status pembayaran real-time, dan verifikasi callback.
+    """
+
+    def __init__(self) -> None:
+        self.api_key = (
+            getattr(settings, "KLIKQRIS_API_KEY", "")
+            or settings.GATEWAY_API_KEY
+            or "rAqu7TOfO43WrZC1WFVF7fNqGQGlIAr0UvR0k6pg"
+        )
+        self.merchant_id = (
+            getattr(settings, "KLIKQRIS_MERCHANT_ID", "")
+            or settings.GATEWAY_MERCHANT_CODE
+            or "179046112227"
+        )
+        self.base_url = (
+            getattr(settings, "KLIKQRIS_BASE_URL", "")
+            or "https://klikqris.com/api"
+        ).rstrip("/")
+
+    def verify_webhook_signature(
+        self,
+        json_data: str = "",
+        received_signature: str = "",
+        *args,
+        **kwargs,
+    ) -> bool:
+        """Verifikasi signature callback KlikQRIS jika disediakan."""
+        if not self.api_key or not received_signature:
+            return True
+        try:
+            expected = hmac.new(
+                self.api_key.encode("utf-8"),
+                json_data.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            return hmac.compare_digest(expected, received_signature)
+        except Exception:
+            return True
+
+    async def create_qris_transaction(
+        self,
+        merchant_ref: str,
+        amount: int,
+        customer_name: str = "Customer",
+        description: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Membuat transaksi QRIS Dinamis melalui API KlikQRIS (POST /api/qris/create).
+        """
+        if not self.api_key or not self.merchant_id:
+            logger.warning("KlikQRIS API Key atau Merchant ID belum diatur.")
+            return None
+
+        url = f"{self.base_url}/qris/create"
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": self.api_key,
+            "id_merchant": str(self.merchant_id),
+            "User-Agent": "Aeternum-PremiApp/1.0",
+        }
+
+        payload = {
+            "order_id": merchant_ref,
+            "amount": int(amount),
+            "id_merchant": str(self.merchant_id),
+            "keterangan": description or f"Pesanan #{merchant_ref} - Aeternum PremiApp",
+            "redirect_url": "https://t.me/aeternum_premibot",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(url, json=payload, headers=headers)
+                data = res.json()
+                if res.status_code in [200, 201] and data.get("status"):
+                    res_data = data.get("data", {})
+                    logger.info(f"KlikQRIS QRIS dibuat: Order ID {res_data.get('order_id')}")
+
+                    total_amount = float(res_data.get("total_amount") or res_data.get("amount") or amount)
+                    raw_amount = float(res_data.get("amount") or amount)
+                    amount_uniq = float(res_data.get("amount_uniq") or 0.0)
+
+                    return {
+                        "invoice_id": res_data.get("order_id") or merchant_ref,
+                        "qris_string": "",
+                        "qris_image": res_data.get("qris_image"),
+                        "qris_url": res_data.get("qris_url"),
+                        "amount": total_amount,
+                        "raw_amount": raw_amount,
+                        "amount_uniq": amount_uniq,
+                        "payment_url": res_data.get("report_url") or res_data.get("qris_url"),
+                        "method": "klikqris",
+                        "signature": res_data.get("signature"),
+                    }
+                else:
+                    logger.error(f"Gagal create payment KlikQRIS ({res.status_code}): {data}")
+                    return None
+        except Exception as e:
+            logger.exception(f"Exception saat request KlikQRIS create: {e}")
+            return None
+
+    async def check_payment_status(self, invoice_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Mengecek status pembayaran live ke server KlikQRIS (GET /api/qris/status/{order_id}).
+        """
+        if not self.api_key or not self.merchant_id or not invoice_id:
+            return None
+
+        url = f"{self.base_url}/qris/status/{invoice_id}"
+        headers = {
+            "x-api-key": self.api_key,
+            "id_merchant": str(self.merchant_id),
+            "User-Agent": "Aeternum-PremiApp/1.0",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.get(url, headers=headers)
+                data = res.json()
+                if res.status_code == 200 and data.get("status"):
+                    res_data = data.get("data", {})
+                    raw_status = (res_data.get("status") or "").upper()
+                    return {
+                        "status": raw_status,
+                        "invoice_id": res_data.get("order_id") or invoice_id,
+                        "amount": res_data.get("amount"),
+                        "total_amount": res_data.get("total_amount"),
+                        "paid_at": res_data.get("paid_at"),
+                        "success": True,
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Error check payment KlikQRIS: {e}")
+            return None
+
+
 class BayarGGGateway:
     """
     Client resmi Payment Gateway BAYAR GG (https://www.bayar.gg/api-docs)
@@ -148,6 +286,14 @@ class TripayGateway:
                 return None
         except Exception:
             return None
+
+    async def create_qris_transaction(
+        self,
+        merchant_ref: str,
+        amount: int,
+        customer_name: str = "Customer",
+        description: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         if not self.api_key or not self.private_key:
             return None
 
@@ -182,7 +328,7 @@ class NirvaPayGateway:
 
     def __init__(self) -> None:
         self.base_url = (getattr(settings, "NIRVAPAY_BASE_URL", "") or "https://nirvapay.dasrams.biz.id").rstrip("/")
-        self.secret_key = getattr(settings, "NIRVAPAY_SECRET_KEY", "sec_live_nirva_e3b829c7140f912b")
+        self.secret_key = getattr(settings, "NIRVAPAY_SECRET_KEY", "")
 
     def verify_webhook_signature(self, *args, **kwargs) -> bool:
         return True
@@ -279,8 +425,10 @@ class GoPayDirectGateway:
 
 
 def get_payment_gateway():
-    gw = (settings.PAYMENT_GATEWAY or "nirvapay").lower()
-    if gw in ["nirvapay", "nirva", "nirva_pay"]:
+    gw = (settings.PAYMENT_GATEWAY or "klikqris").lower()
+    if gw in ["klikqris", "klik_qris", "klik"]:
+        return KlikQRISGateway()
+    elif gw in ["nirvapay", "nirva", "nirva_pay"]:
         return NirvaPayGateway()
     elif gw in ["bayargg", "bayar_gg", "bayar"]:
         return BayarGGGateway()
