@@ -15,21 +15,19 @@ def get_miniapp_url() -> Optional[str]:
     base_url = (settings.WEBHOOK_HOST or "").strip()
     if base_url.startswith("https://"):
         return f"{base_url.rstrip('/')}/app"
-    return None
+    return "https://shop.dasrams.biz.id"
 
 
 def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     
-    # Tampilkan tombol MiniApp HANYA jika URL menggunakan HTTPS valid
-    miniapp_url = get_miniapp_url()
-    if miniapp_url:
-        builder.row(
-            InlineKeyboardButton(
-                text="🚀 Buka Web Store (MiniApp)",
-                web_app=WebAppInfo(url=miniapp_url)
-            )
+    # Tombol Web Store Aeternum Shop
+    builder.row(
+        InlineKeyboardButton(
+            text="🚀 Buka Web Store Aeternum",
+            url="https://shop.dasrams.biz.id"
         )
+    )
     
     builder.row(
         InlineKeyboardButton(text="🛍️ Katalog Produk", callback_data="user_catalog"),

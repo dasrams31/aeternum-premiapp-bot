@@ -8,7 +8,7 @@ import logging
 import traceback
 from typing import Any, Awaitable, Callable, Dict
 from aiogram import BaseMiddleware, Bot
-from aiogram.exceptions import TelegramAPIError, TelegramNetworkError, TelegramRetryAfter
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramNetworkError, TelegramRetryAfter
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
 from config import settings
@@ -32,7 +32,13 @@ class GlobalErrorMiddleware(BaseMiddleware):
             # Gangguan jaringan sementara ke server Telegram (TCP reset / timeout)
             logger.warning(f"⚠️ [NETWORK TRANSIENT GLITCH] Koneksi ke Telegram terputus sementara: {net_err}")
             return None
-        except Exception as exc:
+        except TelegramBadRequest as bad_req:
+            # Abaikan query timeout kadaluarsa / query ID invalid (bukan error sistem/aplikasi)
+            err_msg = str(bad_req).lower()
+            if "query is too old" in err_msg or "message is not modified" in err_msg or "message to edit not found" in err_msg:
+                logger.info(f"ℹ️ [TELEGRAM BENIGN BAD REQUEST] Ignored: {bad_req}")
+                return None
+            exc = bad_req
             user_id = "Unknown"
             username = "-"
             event_type = type(event).__name__
