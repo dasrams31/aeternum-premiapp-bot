@@ -2,10 +2,14 @@
 Aeternum PremiApp Bot - Broadcast rutin ke channel & grup Peka.
 
 Tujuan (ID terverifikasi 7 Nov 2026, bot administrator di keduanya):
-- Channel @peka_aichannel  (-1001475296402): transaksi berhasil, info stok,
-  stok habis, stok ditambah, produk baru, user bergabung.
-- Grup @peka_aigroup      (-1001167087205): ringkasan stok ready harian
-  (digest yang sama dengan yang dikirim ke user), user bergabung.
+- Channel @peka_aichannel  (-1001475296402): SEMUA broadcast rutin
+  (transaksi berhasil, info stok, stok habis, stok ditambah, produk baru,
+  digest stok ready harian, user bergabung).
+- Grup @peka_aigroup      (-1001167087205): TIDAK dikirimi broadcast
+  langsung. Grup adalah discussion group yang terhubung ke channel
+  (linked_chat_id dua arah, terverifikasi 7 Nov 2026), jadi tiap postingan
+  channel otomatis muncul di grup. Mengirim ke grup juga = pesan dobel.
+  Satu-satunya pesan bot di grup: sambutan member baru (welcome).
 
 Semua helper di sini TIDAK PERNAH melempar exception ke pemanggil: kegagalan
 kirim hanya dicatat di log supaya alur utama (pembayaran, restock, digest)
@@ -13,6 +17,7 @@ tidak pernah rusak gara-gara broadcast.
 """
 
 import asyncio
+import html
 import logging
 from pathlib import Path
 from typing import List, Optional
@@ -56,15 +61,16 @@ async def send_to_group(bot: Bot, text: str, **kwargs) -> bool:
         return False
 
 
-async def broadcast_ready_digest_to_group(bot: Bot, chunks: List[str]) -> int:
-    """Kirim ringkasan stok ready harian ke grup Peka. Kembalikan jumlah pesan terkirim."""
+async def broadcast_ready_digest_to_channel(bot: Bot, chunks: List[str]) -> int:
+    """Kirim ringkasan stok ready harian ke channel Peka (grup ikut dapat
+    lewat discussion yang terhubung, tanpa kirim dobel). Kembalikan jumlah pesan terkirim."""
     sent = 0
     for chunk in chunks:
-        if await send_to_group(bot, chunk):
+        if await send_to_channel(bot, chunk):
             sent += 1
             await asyncio.sleep(0.3)
     if sent:
-        logger.info("Ready digest terkirim ke grup Peka (%s pesan).", sent)
+        logger.info("Ready digest terkirim ke channel Peka (%s pesan).", sent)
     return sent
 
 
@@ -123,9 +129,9 @@ async def broadcast_product_added(bot: Bot, product: Product) -> bool:
 
 
 async def broadcast_user_joined(bot: Bot, chat_id: int, first_name: str) -> bool:
-    """User baru gabung channel/grup -> umumkan di chat yang sama."""
+    """User baru gabung CHANNEL -> kabar singkat di channel."""
     text = (
-        f"\U0001f44b Selamat datang <b>{first_name}</b> di komunitas Peka!\n\n"
+        f"\U0001f44b Selamat datang <b>{html.escape(first_name)}</b> di channel Peka!\n\n"
         f"Info AI terbaru, bansos, dan produk digital ada di sini. "
         f"Katalog produk: @aeternum_premibot"
     )
@@ -134,6 +140,39 @@ async def broadcast_user_joined(bot: Bot, chat_id: int, first_name: str) -> bool
         return True
     except Exception as e:
         logger.warning(f"Gagal kirim sambutan gabung ke {chat_id}: {e}")
+        return False
+
+
+def build_group_welcome_text(user_id: int, first_name: str, username: Optional[str]) -> str:
+    """Teks sambutan member baru di grup: tag nama + username + info singkat Peka."""
+    name = html.escape(first_name or "teman baru")
+    mention = f'<a href="tg://user?id={user_id}">{name}</a>'
+    username_line = f" (@{html.escape(username)})" if username else ""
+    return (
+        f"\U0001f44b Selamat datang, {mention}{username_line}!\n\n"
+        f"Kamu sekarang ada di grup <b>PekaAI - Sharing info & Bansos AI</b>.\n\n"
+        f"<b>Peka itu apa?</b>\n"
+        f"Peka AI adalah komunitas seputar AI: info AI terbaru, tools dan "
+        f"gratisan AI, bansos AI, dan produk digital murah.\n\n"
+        f"Yang bisa kamu lakukan di sini:\n"
+        f"\u2022 Baca info terbaru di channel @peka_aichannel\n"
+        f"\u2022 Belanja produk digital di store.peka.ai.id\n"
+        f"\u2022 Order akun premium lewat bot @aeternum_premibot (bayar QRIS, langsung dikirim)\n"
+        f"\u2022 Tanya-tanya soal Peka di chatbot peka.ai.id\n\n"
+        f"Selamat bergabung, jangan sungkan bertanya!"
+    )
+
+
+async def welcome_new_group_member(
+    bot: Bot, chat_id: int, user_id: int, first_name: str, username: Optional[str]
+) -> bool:
+    """Member baru gabung GRUP -> sambutan + tag + info singkat Peka."""
+    text = build_group_welcome_text(user_id, first_name, username)
+    try:
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        return True
+    except Exception as e:
+        logger.warning(f"Gagal kirim sambutan member baru ke {chat_id}: {e}")
         return False
 
 

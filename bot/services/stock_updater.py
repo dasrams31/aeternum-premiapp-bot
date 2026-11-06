@@ -31,7 +31,7 @@ from sqlalchemy import select
 
 from bot.services.broadcast import (
     broadcast_product_added,
-    broadcast_ready_digest_to_group,
+    broadcast_ready_digest_to_channel,
     broadcast_stock_out,
     detect_new_products,
 )
@@ -179,8 +179,9 @@ async def send_daily_ready_digest(bot: Bot, session) -> Tuple[int, int]:
         logger.info("Daily ready digest dilewati: tidak ada produk ready.")
         return 0, 0
     chunks = build_ready_digest_chunks(ready)
-    # Broadcast rutin: ringkasan yang sama juga dishare ke grup Peka.
-    await broadcast_ready_digest_to_group(bot, chunks)
+    # Broadcast rutin: ringkasan dikirim ke channel Peka saja. Grup ikut
+    # dapat lewat discussion yang terhubung (tanpa kirim dobel).
+    await broadcast_ready_digest_to_channel(bot, chunks)
     user_ids = await crud.get_all_user_ids(session=session)
     sent = 0
     for uid in user_ids:
