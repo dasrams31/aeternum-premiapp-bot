@@ -38,6 +38,15 @@ class User(Base):
     referral_balance: Mapped[float] = mapped_column(Numeric(12, 2), default=0.0)
     total_referrals: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Verifikasi gabung channel + grup Peka (gate akses penuh bot)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    verify_last_check_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -106,6 +115,10 @@ class Product(Base):
     warranty_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Manual empty-stock flag: product stays listed but shows as
+    # "Stok Belum Tersedia" and cannot be purchased.
+    is_out_of_stock: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

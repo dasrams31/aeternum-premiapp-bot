@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     # Channel Testimoni (Username @channel atau ID)
     TESTIMONIAL_CHANNEL_ID: Optional[str] = os.getenv("TESTIMONIAL_CHANNEL_ID", None)
 
+    # Channel & grup Peka (broadcast rutin + gate verifikasi gabung).
+    # ID terverifikasi 7 Nov 2026: bot administrator di keduanya.
+    PEKA_CHANNEL_ID: int = int(os.getenv("PEKA_CHANNEL_ID", "-1001475296402"))
+    PEKA_GROUP_ID: int = int(os.getenv("PEKA_GROUP_ID", "-1001167087205"))
+    PEKA_CHANNEL_USERNAME: str = os.getenv("PEKA_CHANNEL_USERNAME", "@peka_aichannel")
+    PEKA_GROUP_USERNAME: str = os.getenv("PEKA_GROUP_USERNAME", "@peka_aigroup")
+    VERIFY_CHECK_INTERVAL_SECONDS: int = int(os.getenv("VERIFY_CHECK_INTERVAL_SECONDS", "900"))
+
     # Webhook
     WEBHOOK_HOST: str = os.getenv("WEBHOOK_HOST", "https://yourdomain.com")
     WEBHOOK_PATH: str = os.getenv("WEBHOOK_PATH", "/webhook/payment")

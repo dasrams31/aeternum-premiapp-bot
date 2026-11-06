@@ -7,6 +7,12 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.services.verification import (
+    check_membership,
+    mark_verified,
+    verification_keyboard,
+    verification_text,
+)
 from config import settings
 from database import crud
 from bot.keyboards.user_kb import back_to_main_kb, main_menu_kb, referral_menu_kb
@@ -51,6 +57,20 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot) -> None:
             )
         except Exception:
             pass
+
+    # Gate verifikasi: user harus gabung channel + grup Peka dulu.
+    # Admin lolos langsung; user yang sudah gabung ditandai terverifikasi.
+    if not is_admin and not db_user.is_verified:
+        in_channel, in_group = await check_membership(bot, user.id)
+        if in_channel and in_group:
+            await mark_verified(session, user.id)
+        else:
+            await message.answer(
+                text=verification_text(not in_channel, not in_group),
+                reply_markup=verification_keyboard(),
+                parse_mode="HTML",
+            )
+            return
 
     welcome_text = (
         f"👋 Halo <b>{user.first_name}</b>, selamat datang di\n"

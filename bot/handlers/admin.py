@@ -22,6 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import crud
+from bot.services.broadcast import broadcast_stock_added
+from bot.services.stock_updater import notify_restock_subscribers
 from database.models import Category, Product, PromoCode, Transaction
 from bot.keyboards.admin_kb import (
     admin_main_kb,
@@ -126,6 +128,7 @@ class AddPromoState(StatesGroup):
 
 class BroadcastState(StatesGroup):
     waiting_for_message = State()
+    waiting_for_target = State()
     waiting_for_confirmation = State()
 
 
@@ -917,23 +920,12 @@ async def process_stock_paste(
     new_total = await crud.count_available_stock(session=session, product_id=product_id)
 
     # Trigger Restock Notifier Broadcast ke pembeli yang menunggu
-    waiting_users = await crud.get_and_clear_restock_subscribers(session=session, product_id=product_id)
+    # (teks notifikasi terpusat di bot/services/stock_updater.py)
     notif_sent = 0
-    if waiting_users and product:
-        for uid in waiting_users:
-            try:
-                alert_text = (
-                    f"🔔 <b>PRODUK SUDAH RESTOCK!</b>\n\n"
-                    f"Produk <b>{product.name}</b> yang Anda tunggu kini telah tersedia kembali!\n"
-                    f"🟢 <b>Stok Baru:</b> <code>{new_total} item</code>\n"
-                    f"💵 <b>Harga:</b> <code>Rp {product.price:,.0f}</code>\n\n"
-                    f"<i>Buka menu /start -> 🛍️ Katalog Produk untuk memesan sekarang sebelum kehabisan!</i>"
-                ).replace(",", ".")
-                await bot.send_message(chat_id=uid, text=alert_text, parse_mode="HTML")
-                notif_sent += 1
-                await asyncio.sleep(0.05)
-            except Exception:
-                pass
+    if product:
+        notif_sent = await notify_restock_subscribers(bot, session, product, new_total)
+        # Broadcast rutin: stok ditambah -> channel Peka
+        await broadcast_stock_added(bot, product, total_added, new_total)
 
     await state.clear()
     
@@ -1635,20 +1627,60 @@ async def cb_start_broadcast(
     await callback.answer()
 
 
+def _broadcast_target_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="👥 Semua Pengguna Bot", callback_data="bcast_target_users"),
+    )
+    kb.row(
+        InlineKeyboardButton(text="📣 Channel Peka", callback_data="bcast_target_channel"),
+        InlineKeyboardButton(text="👥 Grup Peka", callback_data="bcast_target_group"),
+    )
+    kb.row(
+        InlineKeyboardButton(text="📣 Channel + Grup Peka", callback_data="bcast_target_both"),
+    )
+    kb.row(
+        InlineKeyboardButton(text="❌ Batalkan", callback_data="admin_dashboard"),
+    )
+    return kb.as_markup()
+
+
 @router.message(BroadcastState.waiting_for_message)
 async def process_broadcast_input(message: Message, state: FSMContext) -> None:
     await state.update_data(
         broadcast_chat_id=message.chat.id,
         broadcast_msg_id=message.message_id,
     )
-    await state.set_state(BroadcastState.waiting_for_confirmation)
+    await state.set_state(BroadcastState.waiting_for_target)
 
     await message.answer(
-        "👁️ <b>PREVIEW PESAN BROADCAST TERVERIFIKASI</b>\n\n"
-        "Pesan di atas akan dikirimkan ke seluruh pengguna bot. Apakah Anda yakin ingin melanjutkan?",
-        reply_markup=confirm_broadcast_kb(),
+        "🎯 <b>PILIH TUJUAN BROADCAST</b>\n\n"
+        "Pesan di atas mau dikirim ke mana?",
+        reply_markup=_broadcast_target_kb(),
         parse_mode="HTML",
     )
+
+
+@router.callback_query(BroadcastState.waiting_for_target, F.data.startswith("bcast_target_"))
+async def cb_broadcast_target(callback: CallbackQuery, state: FSMContext) -> None:
+    target = (callback.data or "").replace("bcast_target_", "")
+    await state.update_data(broadcast_target=target)
+    await state.set_state(BroadcastState.waiting_for_confirmation)
+    labels = {
+        "users": "seluruh pengguna bot",
+        "channel": "Channel Peka (@peka_aichannel)",
+        "group": "Grup Peka (@peka_aigroup)",
+        "both": "Channel + Grup Peka",
+    }
+    if callback.message:
+        await callback.message.edit_text(
+            "👁️ <b>PREVIEW PESAN BROADCAST TERVERIFIKASI</b>\n\n"
+            f"Pesan di atas akan dikirimkan ke <b>{labels.get(target, target)}</b>. "
+            "Apakah Anda yakin ingin melanjutkan?",
+            reply_markup=confirm_broadcast_kb(),
+            parse_mode="HTML",
+        )
+    await callback.answer()
 
 
 @router.callback_query(BroadcastState.waiting_for_confirmation, F.data == "confirm_send_broadcast")
@@ -1658,33 +1690,58 @@ async def cb_execute_broadcast(
     data = await state.get_data()
     src_chat_id = data["broadcast_chat_id"]
     src_msg_id = data["broadcast_msg_id"]
+    target = data.get("broadcast_target", "users")
     await state.clear()
 
-    user_ids = await crud.get_all_user_ids(session=session)
     if callback.message:
         await callback.message.edit_text("⏳ <i>Sedang mengirimkan siaran pesan... Mohon tunggu.</i>", parse_mode="HTML")
 
     success_count = 0
     failed_count = 0
 
-    for uid in user_ids:
-        try:
-            await bot.copy_message(
-                chat_id=uid,
-                from_chat_id=src_chat_id,
-                message_id=src_msg_id,
-            )
-            success_count += 1
-            await asyncio.sleep(0.05)
-        except Exception:
-            failed_count += 1
+    if target == "users":
+        user_ids = await crud.get_all_user_ids(session=session)
+        for uid in user_ids:
+            try:
+                await bot.copy_message(
+                    chat_id=uid,
+                    from_chat_id=src_chat_id,
+                    message_id=src_msg_id,
+                )
+                success_count += 1
+                await asyncio.sleep(0.05)
+            except Exception:
+                failed_count += 1
+        total = len(user_ids)
+        target_label = "Pengguna"
+    else:
+        from config import settings as _settings
+
+        dests = []
+        if target in ("channel", "both"):
+            dests.append((_settings.PEKA_CHANNEL_ID, "Channel Peka"))
+        if target in ("group", "both"):
+            dests.append((_settings.PEKA_GROUP_ID, "Grup Peka"))
+        total = len(dests)
+        target_label = "Tujuan"
+        for chat_id, _label in dests:
+            try:
+                await bot.copy_message(
+                    chat_id=chat_id,
+                    from_chat_id=src_chat_id,
+                    message_id=src_msg_id,
+                )
+                success_count += 1
+            except Exception as e:
+                failed_count += 1
+                logger.warning(f"Gagal broadcast pengumuman ke {chat_id}: {e}")
 
     summary_text = (
         f"✅ <b>BROADCAST SELESAI DIKIRIMKAN!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🟢 <b>Berhasil Terkirim:</b> {success_count} Pengguna\n"
-        f"🔴 <b>Gagal / Diblokir:</b> {failed_count} Pengguna\n"
-        f"👥 <b>Total Target:</b> {len(user_ids)} Pengguna"
+        f"🟢 <b>Berhasil Terkirim:</b> {success_count} {target_label}\n"
+        f"🔴 <b>Gagal / Diblokir:</b> {failed_count} {target_label}\n"
+        f"👥 <b>Total Target:</b> {total} {target_label}"
     )
 
     if callback.message:

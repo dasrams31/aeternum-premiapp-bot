@@ -13,6 +13,7 @@ from sqlalchemy import select
 from database import crud
 from database.connection import async_session
 from database.models import Product, Transaction
+from bot.services.broadcast import broadcast_transaction_success
 from bot.services.fulfillment import deliver_purchased_product
 from config import settings
 from webhook.gateway import get_payment_gateway
@@ -115,6 +116,14 @@ async def start_auto_payment_poller(bot: Bot, interval_seconds: int = 6) -> None
                             if product:
                                 delivered = await deliver_purchased_product(
                                     bot=bot, session=session, transaction=trx, product=product
+                                )
+                                # Broadcast rutin: transaksi berhasil -> channel Peka
+                                buyer = await crud.get_user_by_id(session=session, user_id=trx.user_id)
+                                await broadcast_transaction_success(
+                                    bot,
+                                    product_name=product.name,
+                                    amount=float(trx.amount),
+                                    buyer_first_name=buyer.first_name if buyer else None,
                                 )
 
                                 try:
