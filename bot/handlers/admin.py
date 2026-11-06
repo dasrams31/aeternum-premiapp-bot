@@ -1640,6 +1640,9 @@ def _broadcast_target_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="📣 Channel + Grup Peka", callback_data="bcast_target_both"),
     )
     kb.row(
+        InlineKeyboardButton(text="📣 Channel Aeternum", callback_data="bcast_target_aeternum"),
+    )
+    kb.row(
         InlineKeyboardButton(text="❌ Batalkan", callback_data="admin_dashboard"),
     )
     return kb.as_markup()
@@ -1671,6 +1674,7 @@ async def cb_broadcast_target(callback: CallbackQuery, state: FSMContext) -> Non
         "channel": "Channel Peka (@peka_aichannel)",
         "group": "Grup Peka (@peka_aigroup)",
         "both": "Channel + Grup Peka",
+        "aeternum": "Channel Aeternum (@aeternum_premich)",
     }
     if callback.message:
         await callback.message.edit_text(
@@ -1722,6 +1726,8 @@ async def cb_execute_broadcast(
             dests.append((_settings.PEKA_CHANNEL_ID, "Channel Peka"))
         if target in ("group", "both"):
             dests.append((_settings.PEKA_GROUP_ID, "Grup Peka"))
+        if target in ("aeternum",):
+            dests.append((_settings.AETERNUM_CHANNEL_ID, "Channel Aeternum"))
         total = len(dests)
         target_label = "Tujuan"
         for chat_id, _label in dests:

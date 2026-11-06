@@ -58,15 +58,15 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot) -> None:
         except Exception:
             pass
 
-    # Gate verifikasi: user harus gabung channel + grup Peka dulu.
+    # Gate verifikasi: user harus gabung channel + grup Peka + channel Aeternum dulu.
     # Admin lolos langsung; user yang sudah gabung ditandai terverifikasi.
     if not is_admin and not db_user.is_verified:
-        in_channel, in_group = await check_membership(bot, user.id)
-        if in_channel and in_group:
+        in_channel, in_group, in_aeternum = await check_membership(bot, user.id)
+        if in_channel and in_group and in_aeternum:
             await mark_verified(session, user.id)
         else:
             await message.answer(
-                text=verification_text(not in_channel, not in_group),
+                text=verification_text(not in_channel, not in_group, not in_aeternum),
                 reply_markup=verification_keyboard(),
                 parse_mode="HTML",
             )

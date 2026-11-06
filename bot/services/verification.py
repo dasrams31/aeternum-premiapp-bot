@@ -1,15 +1,16 @@
 """
-Aeternum PremiApp Bot - Gate verifikasi gabung channel + grup Peka.
+Aeternum PremiApp Bot - Gate verifikasi gabung 3 chat.
 
 Sebelum memakai bot secara penuh, user harus gabung:
-- Channel Peka  @peka_aichannel
-- Grup Peka     @peka_aigroup
+- Channel Peka     @peka_aichannel
+- Grup Peka        @peka_aigroup
+- Channel Aeternum @aeternum_premich
 
 Alur:
 - /start (atau pesan/tombol apa pun) dari user yang belum terverifikasi
   menampilkan prompt verifikasi: tombol gabung (URL) + tombol
   "Saya Sudah Gabung - Cek Sekarang".
-- Tombol cek memanggil get_chat_member untuk kedua chat; bila keduanya
+- Tombol cek memanggil get_chat_member untuk ketiga chat; bila ketiganya
   member/administrator/creator, user ditandai terverifikasi dan langsung
   masuk menu utama.
 - Cron checker (start_verification_checker) mengecek ulang user yang belum
@@ -53,8 +54,8 @@ async def ensure_verification_columns() -> None:
     logger.info("Kolom verifikasi users dipastikan ada.")
 
 
-async def check_membership(bot: Bot, user_id: int) -> tuple[bool, bool]:
-    """Cek apakah user sudah gabung channel + grup Peka. (in_channel, in_group)."""
+async def check_membership(bot: Bot, user_id: int) -> tuple[bool, bool, bool]:
+    """Cek apakah user sudah gabung 3 chat. (in_channel, in_group, in_aeternum)."""
     async def _joined(chat_id: int) -> bool:
         try:
             member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
@@ -65,7 +66,8 @@ async def check_membership(bot: Bot, user_id: int) -> tuple[bool, bool]:
 
     in_channel = await _joined(settings.PEKA_CHANNEL_ID)
     in_group = await _joined(settings.PEKA_GROUP_ID)
-    return in_channel, in_group
+    in_aeternum = await _joined(settings.AETERNUM_CHANNEL_ID)
+    return in_channel, in_group, in_aeternum
 
 
 async def is_user_verified(session, user_id: int) -> bool:
@@ -82,7 +84,7 @@ async def mark_verified(session, user_id: int) -> None:
         user.is_verified = True
         user.verified_at = datetime.now(timezone.utc)
         await session.commit()
-        logger.info(f"User {user_id} terverifikasi gabung channel+grup.")
+        logger.info(f"User {user_id} terverifikasi gabung 3 chat (Peka + Aeternum).")
 
 
 def verification_keyboard() -> InlineKeyboardMarkup:
@@ -99,17 +101,24 @@ def verification_keyboard() -> InlineKeyboardMarkup:
         )
     )
     builder.row(
+        InlineKeyboardButton(
+            text="📣 Gabung Channel Aeternum", url=f"https://t.me/{settings.AETERNUM_CHANNEL_USERNAME.lstrip('@')}"
+        )
+    )
+    builder.row(
         InlineKeyboardButton(text="✅ Saya Sudah Gabung — Cek Sekarang", callback_data="verify_check")
     )
     return builder.as_markup()
 
 
-def verification_text(missing_channel: bool, missing_group: bool) -> str:
+def verification_text(missing_channel: bool, missing_group: bool, missing_aeternum: bool = False) -> str:
     missing = []
     if missing_channel:
         missing.append(f"Channel Peka ({settings.PEKA_CHANNEL_USERNAME})")
     if missing_group:
         missing.append(f"Grup Peka ({settings.PEKA_GROUP_USERNAME})")
+    if missing_aeternum:
+        missing.append(f"Channel Aeternum ({settings.AETERNUM_CHANNEL_USERNAME})")
     if not missing:
         return (
             "🔐 <b>VERIFIKASI AKSES</b>\n"
@@ -121,7 +130,8 @@ def verification_text(missing_channel: bool, missing_group: bool) -> str:
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "Sebelum memakai bot ini, gabung dulu di:\n"
         f"• <b>{'✅' if not missing_channel else '❌'} Channel Peka</b> ({settings.PEKA_CHANNEL_USERNAME})\n"
-        f"• <b>{'✅' if not missing_group else '❌'} Grup Peka</b> ({settings.PEKA_GROUP_USERNAME})\n\n"
+        f"• <b>{'✅' if not missing_group else '❌'} Grup Peka</b> ({settings.PEKA_GROUP_USERNAME})\n"
+        f"• <b>{'✅' if not missing_aeternum else '❌'} Channel Aeternum</b> ({settings.AETERNUM_CHANNEL_USERNAME})\n\n"
         "Kamu belum gabung di: <b>" + ", ".join(missing) + "</b>.\n\n"
         "Tekan tombol gabung di bawah, lalu tekan "
         "<b>✅ Saya Sudah Gabung — Cek Sekarang</b>."
@@ -130,11 +140,11 @@ def verification_text(missing_channel: bool, missing_group: bool) -> str:
 
 async def send_verification_prompt(bot: Bot, user_id: int) -> None:
     """Kirim prompt verifikasi (cek status gabung dulu supaya checklistnya akurat)."""
-    in_channel, in_group = await check_membership(bot, user_id)
+    in_channel, in_group, in_aeternum = await check_membership(bot, user_id)
     try:
         await bot.send_message(
             chat_id=user_id,
-            text=verification_text(not in_channel, not in_group),
+            text=verification_text(not in_channel, not in_group, not in_aeternum),
             reply_markup=verification_keyboard(),
             parse_mode="HTML",
         )
@@ -148,11 +158,11 @@ async def _check_one_user(bot: Bot, user_id: int) -> None:
         user = await crud.get_user_by_id(session=session, user_id=user_id)
         if not user or user.is_verified or user_id == settings.ADMIN_ID:
             return
-        in_channel, in_group = await check_membership(bot, user_id)
+        in_channel, in_group, in_aeternum = await check_membership(bot, user_id)
         now = datetime.now(timezone.utc)
         user.verify_last_check_at = now
         await session.commit()
-        if in_channel and in_group:
+        if in_channel and in_group and in_aeternum:
             await mark_verified(session, user_id)
             try:
                 await bot.send_message(
@@ -160,7 +170,7 @@ async def _check_one_user(bot: Bot, user_id: int) -> None:
                     text=(
                         "✅ <b>VERIFIKASI BERHASIL!</b>\n"
                         "━━━━━━━━━━━━━━━━━━━━━\n"
-                        "Kamu sudah gabung Channel dan Grup Peka. "
+                        "Kamu sudah gabung Channel dan Grup Peka serta Channel Aeternum. "
                         "Akses penuh bot sudah terbuka.\n\n"
                         "Silakan /start untuk memulai bot."
                     ),
@@ -174,6 +184,8 @@ async def _check_one_user(bot: Bot, user_id: int) -> None:
                 missing.append(f"Channel Peka ({settings.PEKA_CHANNEL_USERNAME})")
             if not in_group:
                 missing.append(f"Grup Peka ({settings.PEKA_GROUP_USERNAME})")
+            if not in_aeternum:
+                missing.append(f"Channel Aeternum ({settings.AETERNUM_CHANNEL_USERNAME})")
             try:
                 await bot.send_message(
                     chat_id=user_id,

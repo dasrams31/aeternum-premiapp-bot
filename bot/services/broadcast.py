@@ -1,15 +1,20 @@
 """
 Aeternum PremiApp Bot - Broadcast rutin ke channel & grup Peka.
 
-Tujuan (ID terverifikasi 7 Nov 2026, bot administrator di keduanya):
-- Channel @peka_aichannel  (-1001475296402): SEMUA broadcast rutin
-  (transaksi berhasil, info stok, stok habis, stok ditambah, produk baru,
-  digest stok ready harian, user bergabung).
-- Grup @peka_aigroup      (-1001167087205): TIDAK dikirimi broadcast
-  langsung. Grup adalah discussion group yang terhubung ke channel
+PEMISAHAN PEKA vs AETERNUM (perintah user 7 Nov 2026):
+- Channel Peka @peka_aichannel (-1001475296402): HANYA info stok ready
+  (digest harian) + konten Peka (dikirim helper telegram_channel.py).
+  Urusan jual-beli lain TIDAK masuk sini.
+- Channel Aeternum @aeternum_premich (-1001369908930): SEMUA broadcast
+  komersial (transaksi berhasil, stok habis, stok ditambah, produk baru)
+  + digest stok ready harian + user bergabung.
+- Grup Peka @peka_aigroup (-1001167087205): TIDAK dikirimi broadcast
+  langsung. Grup adalah discussion group yang terhubung ke channel Peka
   (linked_chat_id dua arah, terverifikasi 7 Nov 2026), jadi tiap postingan
-  channel otomatis muncul di grup. Mengirim ke grup juga = pesan dobel.
+  channel Peka otomatis muncul di grup. Mengirim ke grup juga = pesan dobel.
   Satu-satunya pesan bot di grup: sambutan member baru (welcome).
+- Channel Peka TIDAK lagi memberi sambutan gabung (bersih buat broadcast);
+  gabung channel Aeternum dapat kabar singkat.
 
 Semua helper di sini TIDAK PERNAH melempar exception ke pemanggil: kegagalan
 kirim hanya dicatat di log supaya alur utama (pembayaran, restock, digest)
@@ -49,6 +54,18 @@ async def send_to_channel(bot: Bot, text: str, **kwargs) -> bool:
         return False
 
 
+async def send_to_aeternum(bot: Bot, text: str, **kwargs) -> bool:
+    """Kirim satu pesan ke channel Aeternum (@aeternum_premich). True bila terkirim."""
+    try:
+        await bot.send_message(
+            chat_id=settings.AETERNUM_CHANNEL_ID, text=text, parse_mode="HTML", **kwargs
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"Gagal kirim ke channel Aeternum: {e}")
+        return False
+
+
 async def send_to_group(bot: Bot, text: str, **kwargs) -> bool:
     """Kirim satu pesan ke grup Peka. Kembalikan True bila terkirim."""
     try:
@@ -74,10 +91,22 @@ async def broadcast_ready_digest_to_channel(bot: Bot, chunks: List[str]) -> int:
     return sent
 
 
+async def broadcast_ready_digest_to_aeternum(bot: Bot, chunks: List[str]) -> int:
+    """Kirim ringkasan stok ready harian ke channel Aeternum. Kembalikan jumlah pesan terkirim."""
+    sent = 0
+    for chunk in chunks:
+        if await send_to_aeternum(bot, chunk):
+            sent += 1
+            await asyncio.sleep(0.3)
+    if sent:
+        logger.info("Ready digest terkirim ke channel Aeternum (%s pesan).", sent)
+    return sent
+
+
 async def broadcast_transaction_success(
     bot: Bot, product_name: str, amount: float, buyer_first_name: Optional[str]
 ) -> bool:
-    """Transaksi berhasil -> channel. Tanpa data sensitif (tanpa WA, ID, atau isi akun)."""
+    """Transaksi berhasil -> channel Aeternum. Tanpa data sensitif (tanpa WA, ID, atau isi akun)."""
     buyer_line = (
         f"\U0001f464 <b>Pembeli:</b> <b>{buyer_first_name}</b>\n" if buyer_first_name else ""
     )
@@ -88,11 +117,11 @@ async def broadcast_transaction_success(
         f"{buyer_line}\n"
         f"Beli juga di @aeternum_premibot \u2014 bayar QRIS, langsung dikirim."
     )
-    return await send_to_channel(bot, text)
+    return await send_to_aeternum(bot, text)
 
 
 async def broadcast_stock_out(bot: Bot, product: Product) -> bool:
-    """Produk TEXT_STOCK kehabisan stok -> channel."""
+    """Produk TEXT_STOCK kehabisan stok -> channel Aeternum."""
     text = (
         f"\U0001f525 <b>STOK HABIS!</b>\n\n"
         f"\U0001f4e6 <b>Produk:</b> {product.name}\n"
@@ -100,11 +129,11 @@ async def broadcast_stock_out(bot: Bot, product: Product) -> bool:
         f"Stok sedang diusahakan. Tekan \U0001f514 <b>Ingatkan Saya Saat Restock</b> "
         f"di bot @aeternum_premibot biar dikabari begitu ready lagi."
     )
-    return await send_to_channel(bot, text)
+    return await send_to_aeternum(bot, text)
 
 
 async def broadcast_stock_added(bot: Bot, product: Product, added: int, total: int) -> bool:
-    """Admin menambah stok akun -> channel."""
+    """Admin menambah stok akun -> channel Aeternum."""
     text = (
         f"\U0001f4e6 <b>STOK DITAMBAH!</b>\n\n"
         f"\U0001f4e6 <b>Produk:</b> {product.name}\n"
@@ -114,25 +143,25 @@ async def broadcast_stock_added(bot: Bot, product: Product, added: int, total: i
         f"Bila berminat, bisa /start lalu buka \U0001f6cd\ufe0f Katalog Produk "
         f"untuk memesan sebelum kehabisan!"
     )
-    return await send_to_channel(bot, text)
+    return await send_to_aeternum(bot, text)
 
 
 async def broadcast_product_added(bot: Bot, product: Product) -> bool:
-    """Produk baru masuk katalog -> channel."""
+    """Produk baru masuk katalog -> channel Aeternum."""
     text = (
         f"\U0001f195 <b>PRODUK BARU!</b>\n\n"
         f"\U0001f4e6 <b>Produk:</b> {product.name}\n"
         f"\U0001f4b5 <b>Harga:</b> <code>{_rupiah(product.price)}</code>\n\n"
         f"Cek langsung di @aeternum_premibot \u2014 bayar QRIS, langsung dikirim."
     )
-    return await send_to_channel(bot, text)
+    return await send_to_aeternum(bot, text)
 
 
 async def broadcast_user_joined(bot: Bot, chat_id: int, first_name: str) -> bool:
-    """User baru gabung CHANNEL -> kabar singkat di channel."""
+    """User baru gabung CHANNEL AETERNUM -> kabar singkat di channel itu."""
     text = (
-        f"\U0001f44b Selamat datang <b>{html.escape(first_name)}</b> di channel Peka!\n\n"
-        f"Info AI terbaru, bansos, dan produk digital ada di sini. "
+        f"\U0001f44b Selamat datang <b>{html.escape(first_name)}</b> di channel Aeternum!\n\n"
+        f"Info produk digital, stok ready, dan promo ada di sini. "
         f"Katalog produk: @aeternum_premibot"
     )
     try:

@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     PEKA_GROUP_ID: int = int(os.getenv("PEKA_GROUP_ID", "-1001167087205"))
     PEKA_CHANNEL_USERNAME: str = os.getenv("PEKA_CHANNEL_USERNAME", "@peka_aichannel")
     PEKA_GROUP_USERNAME: str = os.getenv("PEKA_GROUP_USERNAME", "@peka_aigroup")
+
+    # Channel Aeternum @aeternum_premich (broadcast komersial + gate verifikasi).
+    # ID terverifikasi 7 Nov 2026: bot administrator, bisa posting.
+    AETERNUM_CHANNEL_ID: int = int(os.getenv("AETERNUM_CHANNEL_ID", "-1001369908930"))
+    AETERNUM_CHANNEL_USERNAME: str = os.getenv("AETERNUM_CHANNEL_USERNAME", "@aeternum_premich")
     VERIFY_CHECK_INTERVAL_SECONDS: int = int(os.getenv("VERIFY_CHECK_INTERVAL_SECONDS", "900"))
 
     # Webhook
