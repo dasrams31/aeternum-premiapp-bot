@@ -17,6 +17,20 @@ dan tidak ditandai out-of-stock.
 Digest harian dikirim maksimal sekali per hari kalender (WIB), dicatat di
 last_digest.txt di folder bot, supaya restart bot tidak mengirim duplikat
 di hari yang sama.
+
+BROADCAST EVENT (perintah user 7 Nov 2026):
+- Restock & produk baru adalah SATU event = SATU broadcast: channel
+  Aeternum + DM semua pengguna + (restock) notifikasi subscriber.
+- Trigger-nya aksi NYATA admin (tambah stok / buat produk), BUKAN sync
+  berkala worker ini — supaya tidak spam tiap sync. Worker harian hanya
+  jadi pengaman: notifikasi subscriber bila flag berubah OUT->ready, dan
+  broadcast produk baru bila ada produk yang lolos dari alur admin
+  (mis. dibuat lewat script).
+- ATURAN ANTI-GANDA: penunggu restock suatu produk HANYA menerima
+  notifikasi subscriber-nya, TIDAK menerima DM broadcast umum produk itu.
+  broadcast_restock_event() mengambil daftar subscriber dulu, lalu
+  mengecualikan mereka dari DM umum, baru mengirim notifikasi subscriber
+  (yang sekaligus membersihkan daftar tunggu).
 """
 
 import asyncio
@@ -33,8 +47,14 @@ from bot.services.broadcast import (
     broadcast_product_added,
     broadcast_ready_digest_to_aeternum,
     broadcast_ready_digest_to_channel,
+    broadcast_stock_added,
     broadcast_stock_out,
+    broadcast_to_all_users,
+    build_new_product_broadcast_text,
+    build_restock_broadcast_text,
     detect_new_products,
+    get_category_name,
+    product_buy_kb,
 )
 from database import crud
 from database.connection import async_session
@@ -50,32 +70,100 @@ def _rupiah(price) -> str:
     return f"Rp {float(price):,.0f}".replace(",", ".")
 
 
-def build_restock_text(product: Product, new_total: int) -> str:
-    """Teks notifikasi restock (satu sumber, dipakai worker + admin)."""
-    return (
-        f"\U0001f514 <b>PRODUK SUDAH RESTOCK!</b>\n\n"
-        f"Produk <b>{product.name}</b> yang Anda tunggu kini telah tersedia kembali!\n"
-        f"\U0001f7e2 <b>Stok Baru:</b> <code>{new_total} item</code>\n"
-        f"\U0001f4b5 <b>Harga:</b> <code>{_rupiah(product.price)}</code>\n\n"
-        f"Bila berminat, bisa /start lalu buka \U0001f6cd\ufe0f Katalog Produk "
-        f"untuk memesan sebelum kehabisan!"
-    )
-
-
-async def notify_restock_subscribers(bot: Bot, session, product: Product, new_total: int) -> int:
-    """Kirim notifikasi restock ke semua penunggu produk; kembalikan jumlah terkirim."""
+async def notify_restock_subscribers(
+    bot: Bot, session, product: Product, new_total: int, added: Optional[int] = None
+) -> int:
+    """Kirim notifikasi restock (format broadcast) ke semua penunggu produk;
+    kembalikan jumlah terkirim. Daftar tunggu dibersihkan setelah diambil."""
     waiting = await crud.get_and_clear_restock_subscribers(session=session, product_id=product.id)
+    if not waiting:
+        return 0
+    cat_name = await get_category_name(session, product.category_id)
+    text = build_restock_broadcast_text(product, cat_name, added, new_total)
     sent = 0
     for uid in waiting:
         try:
             await bot.send_message(
-                chat_id=uid, text=build_restock_text(product, new_total), parse_mode="HTML"
+                chat_id=uid,
+                text=text,
+                parse_mode="HTML",
+                reply_markup=product_buy_kb(product.id),
             )
             sent += 1
             await asyncio.sleep(0.05)
         except Exception as e:
             logger.warning(f"Gagal kirim notifikasi restock ke {uid} ({product.name}): {e}")
     return sent
+
+
+async def broadcast_restock_event(
+    bot: Bot,
+    session,
+    product: Product,
+    added: int,
+    total: int,
+    test_label: str = "",
+) -> dict:
+    """SATU event restock = SATU broadcast: channel Aeternum + DM semua user
+    (kecuali subscriber produk itu) + notifikasi subscriber.
+
+    Dipanggil dari alur admin tambah stok (aksi nyata), bukan dari sync
+    berkala. `test_label` (mis. "[TEST]") hanya untuk pengujian: ditempel di
+    depan teks broadcast. Kembalikan ringkasan hitungan pengiriman.
+    """
+    channel_ok = await broadcast_stock_added(
+        bot, session, product, added, total, test_label=test_label
+    )
+    sub_ids = set(
+        await crud.get_restock_subscriber_ids(session=session, product_id=product.id)
+    )
+    cat_name = await get_category_name(session, product.category_id)
+    text = build_restock_broadcast_text(product, cat_name, added, total)
+    if test_label:
+        text = f"{test_label}\n{text}"
+    dm_sent, dm_failed = await broadcast_to_all_users(
+        bot,
+        session,
+        text,
+        reply_markup=product_buy_kb(product.id),
+        exclude_ids=sub_ids,
+    )
+    notified = await notify_restock_subscribers(bot, session, product, total, added=added)
+    logger.info(
+        "Broadcast restock %s (id=%s): channel=%s, DM umum=%s (gagal %s), "
+        "subscriber=%s (dikesampingkan %s).",
+        product.name, product.id, channel_ok, dm_sent, dm_failed,
+        notified, len(sub_ids),
+    )
+    return {
+        "channel": channel_ok,
+        "dm_sent": dm_sent,
+        "dm_failed": dm_failed,
+        "subscribers_notified": notified,
+        "excluded_subscribers": len(sub_ids),
+    }
+
+
+async def broadcast_new_product_event(
+    bot: Bot, session, product: Product, test_label: str = ""
+) -> dict:
+    """SATU event produk baru = SATU broadcast: channel Aeternum + DM semua user."""
+    channel_ok = await broadcast_product_added(bot, session, product, test_label=test_label)
+    cat_name = await get_category_name(session, product.category_id)
+    count = None
+    if product.product_type == "TEXT_STOCK":
+        count = await crud.count_available_stock(session=session, product_id=product.id)
+    text = build_new_product_broadcast_text(product, cat_name, count)
+    if test_label:
+        text = f"{test_label}\n{text}"
+    dm_sent, dm_failed = await broadcast_to_all_users(
+        bot, session, text, reply_markup=product_buy_kb(product.id)
+    )
+    logger.info(
+        "Broadcast produk baru %s (id=%s): channel=%s, DM=%s (gagal %s).",
+        product.name, product.id, channel_ok, dm_sent, dm_failed,
+    )
+    return {"channel": channel_ok, "dm_sent": dm_sent, "dm_failed": dm_failed}
 
 
 async def sync_stock_flags(session) -> List[Tuple[Product, bool, bool, int]]:
@@ -125,10 +213,10 @@ async def get_ready_products(session) -> List[Tuple[Product, Optional[int], str]
 def build_ready_digest_chunks(ready: List[Tuple[Product, Optional[int], str]]) -> List[str]:
     """Ringkasan stok ready harian, dipecah per max 3500 karakter."""
     date_str = datetime.now(WIB).strftime("%d %B %Y")
-    header = f"\U0001f4e6 <b>STOK READY HARI INI</b>\n\U0001f4c5 {date_str}"
+    header = f"📦 <b>STOK READY HARI INI</b>\n📅 {date_str}"
     footer = (
         "\nBila berminat, bisa /start lalu buka "
-        "\U0001f6cd\ufe0f Katalog Produk untuk memesan!"
+        "🛍️ Katalog Produk untuk memesan!"
     )
     lines = [header]
     current_cat = None
@@ -137,9 +225,9 @@ def build_ready_digest_chunks(ready: List[Tuple[Product, Optional[int], str]]) -
             current_cat = cat_name
             lines.append(f"\n<b>{cat_name}</b>")
         if count is not None:
-            lines.append(f"\u2022 {product.name} \u2014 {_rupiah(product.price)} ({count} item)")
+            lines.append(f"• {product.name} — {_rupiah(product.price)} ({count} item)")
         else:
-            lines.append(f"\u2022 {product.name} \u2014 {_rupiah(product.price)}")
+            lines.append(f"• {product.name} — {_rupiah(product.price)}")
     lines.append(footer)
     chunks: List[str] = []
     current = ""
@@ -217,11 +305,14 @@ async def run_daily_stock_update(bot: Bot):
             if old_flag and not new_flag:
                 notified_total += await notify_restock_subscribers(bot, session, product, count)
             elif not old_flag and new_flag:
-                # Broadcast rutin: produk kehabisan stok -> channel Peka
-                await broadcast_stock_out(bot, product)
-        # Broadcast rutin: produk baru masuk katalog -> channel Peka
+                # Broadcast rutin: produk kehabisan stok -> channel Aeternum
+                # (dengan tombol pengingat restock).
+                await broadcast_stock_out(bot, session, product)
+        # Pengaman: produk baru yang lolos dari alur admin (mis. dibuat lewat
+        # script) tetap di-broadcast sekali di sini. Produk dari alur admin
+        # sudah ditandai known saat dibuat, jadi tidak dobel.
         for new_product in await detect_new_products(session):
-            await broadcast_product_added(bot, new_product)
+            await broadcast_new_product_event(bot, session, new_product)
         if changed:
             for product, old_flag, new_flag, count in changed:
                 logger.info(

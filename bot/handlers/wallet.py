@@ -320,6 +320,10 @@ async def cb_pay_with_balance(
         await callback.answer("Produk tidak tersedia!", show_alert=True)
         return
 
+    if getattr(product, "is_out_of_stock", False):
+        await callback.answer("Stok produk ini belum tersedia!", show_alert=True)
+        return
+
     # Ambil promo jika ada di state
     state_data = await state.get_data()
     promo_code = state_data.get("applied_promo_code")

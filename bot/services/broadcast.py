@@ -16,6 +16,18 @@ PEMISAHAN PEKA vs AETERNUM (perintah user 7 Nov 2026):
 - Channel Peka TIDAK lagi memberi sambutan gabung (bersih buat broadcast);
   gabung channel Aeternum dapat kabar singkat.
 
+FORMAT BROADCAST PRODUK (perintah user 7 Nov 2026, meniru format toko lain):
+- Restock: "🔄 RESTOCK PRODUK!" + nama + kategori + stok ditambah + total
+  stok + harga mulai + tombol [🛒 Beli Sekarang] (deep-link produk).
+- Produk baru: "🆕 PRODUK BARU!" + nama + kategori + stok + harga mulai
+  (+ deskripsi singkat) + tombol [🛒 Beli Sekarang].
+- Stok habis: "🔴 STOK HABIS!" + tombol [🔔 Ingatkan Saya Saat Restock]
+  (deep-link /start remind_<id>).
+- Broadcast dikirim ke channel Aeternum DAN ke DM semua pengguna bot.
+  Aturan anti-ganda: penunggu restock suatu produk HANYA menerima
+  notifikasi subscriber (bukan DM broadcast umum produk itu) — lihat
+  broadcast_restock_event() di bot/services/stock_updater.py.
+
 Semua helper di sini TIDAK PERNAH melempar exception ke pemanggil: kegagalan
 kirim hanya dicatat di log supaya alur utama (pembayaran, restock, digest)
 tidak pernah rusak gara-gara broadcast.
@@ -25,21 +37,136 @@ import asyncio
 import html
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set, Tuple
 
 from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import select
 
 from config import settings
-from database.models import Product
+from database.models import Category, Product
 
 logger = logging.getLogger(__name__)
 
 KNOWN_PRODUCTS_FILE = Path(__file__).resolve().parent.parent.parent / "known_products.txt"
 
+BOT_USERNAME = "aeternum_premibot"
+BOT_DEEP_LINK_BASE = f"https://t.me/{BOT_USERNAME}"
+
 
 def _rupiah(price) -> str:
     return f"Rp {float(price):,.0f}".replace(",", ".")
+
+
+def product_buy_kb(product_id: int) -> InlineKeyboardMarkup:
+    """Tombol [🛒 Beli Sekarang]: deep-link ke detail produk di bot."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🛒 Beli Sekarang",
+                    url=f"{BOT_DEEP_LINK_BASE}?start=product_{product_id}",
+                )
+            ]
+        ]
+    )
+
+
+def remind_kb(product_id: int) -> InlineKeyboardMarkup:
+    """Tombol [🔔 Ingatkan Saya Saat Restock]: deep-link subscribe pengingat.
+
+    Dipakai di pesan channel (callback tidak bisa dipakai dari channel):
+    tap tombol -> bot terbuka dengan /start remind_<id> -> user langsung
+    terdaftar sebagai penunggu restock produk itu.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔔 Ingatkan Saya Saat Restock",
+                    url=f"{BOT_DEEP_LINK_BASE}?start=remind_{product_id}",
+                )
+            ]
+        ]
+    )
+
+
+async def get_category_name(session, category_id: Optional[int]) -> str:
+    """Nama kategori produk; 'Lainnya' bila tidak ada."""
+    if not category_id:
+        return "Lainnya"
+    res = await session.execute(select(Category).where(Category.id == category_id))
+    cat = res.scalar_one_or_none()
+    return cat.name if cat else "Lainnya"
+
+
+def _stock_line(product: Product, count: Optional[int]) -> str:
+    """Baris stok untuk broadcast produk baru."""
+    if product.product_type == "TEXT_STOCK":
+        if count is None or count == 0:
+            return "Segera hadir"
+        return f"{count} unit"
+    return "Tersedia"
+
+
+def build_restock_broadcast_text(
+    product: Product, cat_name: str, added: Optional[int], total: int
+) -> str:
+    """Teks broadcast restock (satu sumber: channel + DM + notifikasi subscriber).
+
+    `added=None` (jalur sinkronisasi harian, jumlah penambahan tidak
+    diketahui) -> baris 'Stok ditambah' dihilangkan.
+    """
+    name = html.escape(product.name)
+    cat = html.escape(cat_name)
+    lines = [
+        "🔄 <b>RESTOCK PRODUK!</b>",
+        "",
+        f"📦 <b>{name}</b>",
+        f"🏷️ Kategori: {cat}",
+    ]
+    if added is not None:
+        lines.append(f"➕ Stok ditambah: <b>+{added} unit</b>")
+    lines.append(f"📊 Total stok siap kirim: <b>{total} unit</b>")
+    lines.append(f"💲 Harga mulai: <b>{_rupiah(product.price)}</b>")
+    lines.append("")
+    lines.append("Stok sudah kembali segar dan siap dikirim otomatis! 👇")
+    return "\n".join(lines)
+
+
+def build_new_product_broadcast_text(
+    product: Product, cat_name: str, count: Optional[int]
+) -> str:
+    """Teks broadcast produk baru (satu sumber: channel + DM)."""
+    name = html.escape(product.name)
+    cat = html.escape(cat_name)
+    lines = [
+        "🆕 <b>PRODUK BARU!</b>",
+        "",
+        f"📦 <b>{name}</b>",
+        f"🏷️ Kategori: {cat}",
+        f"📊 Stok siap kirim: <b>{_stock_line(product, count)}</b>",
+        f"💲 Harga mulai: <b>{_rupiah(product.price)}</b>",
+    ]
+    if product.description:
+        desc = " ".join(product.description.split())[:200]
+        lines.append(f"📝 {html.escape(desc)}")
+    lines.append("")
+    lines.append("Cek langsung di @aeternum_premibot — bayar QRIS, langsung dikirim.")
+    return "\n".join(lines)
+
+
+def build_stock_out_text(product: Product, cat_name: str) -> str:
+    """Teks broadcast stok habis (channel Aeternum)."""
+    name = html.escape(product.name)
+    cat = html.escape(cat_name)
+    return (
+        "🔴 <b>STOK HABIS!</b>\n\n"
+        f"📦 <b>{name}</b>\n"
+        f"🏷️ Kategori: {cat}\n"
+        f"💲 Harga mulai: <b>{_rupiah(product.price)}</b>\n\n"
+        "Stok sedang diusahakan. Tekan tombol di bawah biar dikabari begitu restock!"
+    )
 
 
 async def send_to_channel(bot: Bot, text: str, **kwargs) -> bool:
@@ -78,6 +205,39 @@ async def send_to_group(bot: Bot, text: str, **kwargs) -> bool:
         return False
 
 
+async def broadcast_to_all_users(
+    bot: Bot,
+    session,
+    text: str,
+    reply_markup: Optional[InlineKeyboardMarkup] = None,
+    exclude_ids: Optional[Set[int]] = None,
+) -> Tuple[int, int]:
+    """Kirim pesan ke DM semua pengguna bot (kecuali exclude_ids).
+
+    Dipakai broadcast produk baru & restock. Kegagalan per user (mis. bot
+    diblokir / akun stale 'chat not found') hanya dicatat, tidak
+    menghentikan pengiriman ke user lain. Kembalikan (terkirim, gagal).
+    """
+    from database import crud
+
+    excluded = exclude_ids or set()
+    user_ids = await crud.get_all_user_ids(session=session)
+    sent, failed = 0, 0
+    for uid in user_ids:
+        if uid in excluded:
+            continue
+        try:
+            await bot.send_message(
+                chat_id=uid, text=text, parse_mode="HTML", reply_markup=reply_markup
+            )
+            sent += 1
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            failed += 1
+            logger.warning(f"Gagal kirim broadcast DM ke {uid}: {e}")
+    return sent, failed
+
+
 async def broadcast_ready_digest_to_channel(bot: Bot, chunks: List[str]) -> int:
     """Kirim ringkasan stok ready harian ke channel Peka (grup ikut dapat
     lewat discussion yang terhubung, tanpa kirim dobel). Kembalikan jumlah pesan terkirim."""
@@ -108,59 +268,64 @@ async def broadcast_transaction_success(
 ) -> bool:
     """Transaksi berhasil -> channel Aeternum. Tanpa data sensitif (tanpa WA, ID, atau isi akun)."""
     buyer_line = (
-        f"\U0001f464 <b>Pembeli:</b> <b>{buyer_first_name}</b>\n" if buyer_first_name else ""
+        f"👤 <b>Pembeli:</b> <b>{buyer_first_name}</b>\n" if buyer_first_name else ""
     )
     text = (
-        f"\u2705 <b>TRANSAKSI BERHASIL!</b>\n\n"
-        f"\U0001f4e6 <b>Produk:</b> {product_name}\n"
-        f"\U0001f4b5 <b>Nominal:</b> <code>{_rupiah(amount)}</code>\n"
+        f"✅ <b>TRANSAKSI BERHASIL!</b>\n\n"
+        f"📦 <b>Produk:</b> {product_name}\n"
+        f"💵 <b>Nominal:</b> <code>{_rupiah(amount)}</code>\n"
         f"{buyer_line}\n"
-        f"Beli juga di @aeternum_premibot \u2014 bayar QRIS, langsung dikirim."
+        f"Beli juga di @aeternum_premibot — bayar QRIS, langsung dikirim."
     )
     return await send_to_aeternum(bot, text)
 
 
-async def broadcast_stock_out(bot: Bot, product: Product) -> bool:
-    """Produk TEXT_STOCK kehabisan stok -> channel Aeternum."""
-    text = (
-        f"\U0001f525 <b>STOK HABIS!</b>\n\n"
-        f"\U0001f4e6 <b>Produk:</b> {product.name}\n"
-        f"\U0001f4b5 <b>Harga:</b> <code>{_rupiah(product.price)}</code>\n\n"
-        f"Stok sedang diusahakan. Tekan \U0001f514 <b>Ingatkan Saya Saat Restock</b> "
-        f"di bot @aeternum_premibot biar dikabari begitu ready lagi."
-    )
-    return await send_to_aeternum(bot, text)
+async def broadcast_stock_out(bot: Bot, session, product: Product) -> bool:
+    """Produk TEXT_STOCK kehabisan stok -> channel Aeternum, dengan tombol
+    pengingat restock (deep-link /start remind_<id>)."""
+    cat_name = await get_category_name(session, product.category_id)
+    text = build_stock_out_text(product, cat_name)
+    return await send_to_aeternum(bot, text, reply_markup=remind_kb(product.id))
 
 
-async def broadcast_stock_added(bot: Bot, product: Product, added: int, total: int) -> bool:
-    """Admin menambah stok akun -> channel Aeternum."""
-    text = (
-        f"\U0001f4e6 <b>STOK DITAMBAH!</b>\n\n"
-        f"\U0001f4e6 <b>Produk:</b> {product.name}\n"
-        f"\u2795 <b>Ditambahkan:</b> <code>+{added} item</code>\n"
-        f"\U0001f7e2 <b>Total tersedia:</b> <code>{total} item</code>\n"
-        f"\U0001f4b5 <b>Harga:</b> <code>{_rupiah(product.price)}</code>\n\n"
-        f"Bila berminat, bisa /start lalu buka \U0001f6cd\ufe0f Katalog Produk "
-        f"untuk memesan sebelum kehabisan!"
-    )
-    return await send_to_aeternum(bot, text)
+async def broadcast_stock_added(
+    bot: Bot,
+    session,
+    product: Product,
+    added: int,
+    total: int,
+    test_label: str = "",
+) -> bool:
+    """Admin menambah stok akun -> channel Aeternum (format restock baru +
+    tombol Beli Sekarang). Bagian channel dari broadcast_restock_event."""
+    cat_name = await get_category_name(session, product.category_id)
+    text = build_restock_broadcast_text(product, cat_name, added, total)
+    if test_label:
+        text = f"{test_label}\n{text}"
+    return await send_to_aeternum(bot, text, reply_markup=product_buy_kb(product.id))
 
 
-async def broadcast_product_added(bot: Bot, product: Product) -> bool:
-    """Produk baru masuk katalog -> channel Aeternum."""
-    text = (
-        f"\U0001f195 <b>PRODUK BARU!</b>\n\n"
-        f"\U0001f4e6 <b>Produk:</b> {product.name}\n"
-        f"\U0001f4b5 <b>Harga:</b> <code>{_rupiah(product.price)}</code>\n\n"
-        f"Cek langsung di @aeternum_premibot \u2014 bayar QRIS, langsung dikirim."
-    )
-    return await send_to_aeternum(bot, text)
+async def broadcast_product_added(
+    bot: Bot, session, product: Product, test_label: str = ""
+) -> bool:
+    """Produk baru masuk katalog -> channel Aeternum (format baru + tombol
+    Beli Sekarang). Bagian channel dari broadcast_new_product_event."""
+    from database import crud
+
+    cat_name = await get_category_name(session, product.category_id)
+    count = None
+    if product.product_type == "TEXT_STOCK":
+        count = await crud.count_available_stock(session=session, product_id=product.id)
+    text = build_new_product_broadcast_text(product, cat_name, count)
+    if test_label:
+        text = f"{test_label}\n{text}"
+    return await send_to_aeternum(bot, text, reply_markup=product_buy_kb(product.id))
 
 
 async def broadcast_user_joined(bot: Bot, chat_id: int, first_name: str) -> bool:
     """User baru gabung CHANNEL AETERNUM -> kabar singkat di channel itu."""
     text = (
-        f"\U0001f44b Selamat datang <b>{html.escape(first_name)}</b> di channel Aeternum!\n\n"
+        f"👋 Selamat datang <b>{html.escape(first_name)}</b> di channel Aeternum!\n\n"
         f"Info produk digital, stok ready, dan promo ada di sini. "
         f"Katalog produk: @aeternum_premibot"
     )
@@ -178,16 +343,16 @@ def build_group_welcome_text(user_id: int, first_name: str, username: Optional[s
     mention = f'<a href="tg://user?id={user_id}">{name}</a>'
     username_line = f" (@{html.escape(username)})" if username else ""
     return (
-        f"\U0001f44b Selamat datang, {mention}{username_line}!\n\n"
+        f"👋 Selamat datang, {mention}{username_line}!\n\n"
         f"Kamu sekarang ada di grup <b>PekaAI - Sharing info & Bansos AI</b>.\n\n"
         f"<b>Peka itu apa?</b>\n"
         f"Peka AI adalah komunitas seputar AI: info AI terbaru, tools dan "
         f"gratisan AI, bansos AI, dan produk digital murah.\n\n"
         f"Yang bisa kamu lakukan di sini:\n"
-        f"\u2022 Baca info terbaru di channel @peka_aichannel\n"
-        f"\u2022 Belanja produk digital di store.peka.ai.id\n"
-        f"\u2022 Order akun premium lewat bot @aeternum_premibot (bayar QRIS, langsung dikirim)\n"
-        f"\u2022 Tanya-tanya soal Peka di chatbot peka.ai.id\n\n"
+        f"• Baca info terbaru di channel @peka_aichannel\n"
+        f"• Belanja produk digital di store.peka.ai.id\n"
+        f"• Order akun premium lewat bot @aeternum_premibot (bayar QRIS, langsung dikirim)\n"
+        f"• Tanya-tanya soal Peka di chatbot peka.ai.id\n\n"
         f"Selamat bergabung, jangan sungkan bertanya!"
     )
 
@@ -205,6 +370,30 @@ async def welcome_new_group_member(
         return False
 
 
+def _read_known_ids() -> Set[int]:
+    """ID produk yang sudah dikenal worker (pernah di-broadcast / dicatat)."""
+    try:
+        return set(
+            int(x) for x in KNOWN_PRODUCTS_FILE.read_text().split() if x.strip().isdigit()
+        )
+    except FileNotFoundError:
+        return set()
+    except Exception as e:
+        logger.warning(f"Tidak bisa baca known_products: {e}")
+        return set()
+
+
+def mark_products_known(product_ids: List[int]) -> None:
+    """Catat ID produk sebagai 'sudah dikenal' supaya worker harian tidak
+    me-broadcast ulang produk yang sudah di-broadcast saat dibuat admin."""
+    try:
+        known = _read_known_ids()
+        known.update(int(i) for i in product_ids)
+        KNOWN_PRODUCTS_FILE.write_text("\n".join(str(i) for i in sorted(known)))
+    except Exception as e:
+        logger.warning(f"Tidak bisa tulis known_products: {e}")
+
+
 async def detect_new_products(session) -> List[Product]:
     """Produk aktif yang belum pernah terlihat worker ini.
 
@@ -216,22 +405,11 @@ async def detect_new_products(session) -> List[Product]:
         select(Product).where(Product.is_active.is_(True)).order_by(Product.id)
     )
     products = list(res.scalars().all())
-    try:
-        known = set(
-            int(x) for x in KNOWN_PRODUCTS_FILE.read_text().split() if x.strip().isdigit()
-        )
-    except FileNotFoundError:
-        known = set()
-    except Exception as e:
-        logger.warning(f"Tidak bisa baca known_products: {e}")
-        known = set()
+    known = _read_known_ids()
     current_ids = {p.id for p in products}
     new = [p for p in products if p.id not in known]
     first_run = not KNOWN_PRODUCTS_FILE.exists()
-    try:
-        KNOWN_PRODUCTS_FILE.write_text("\n".join(str(i) for i in sorted(current_ids)))
-    except Exception as e:
-        logger.warning(f"Tidak bisa tulis known_products: {e}")
+    mark_products_known(sorted(current_ids))
     if first_run:
         return []
     return new

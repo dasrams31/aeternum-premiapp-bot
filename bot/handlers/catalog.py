@@ -97,26 +97,26 @@ async def cb_show_category_products(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("prod_"))
-async def cb_show_product_detail(
-    callback: CallbackQuery, session: AsyncSession, state: FSMContext
-) -> None:
-    await state.clear()
-    user = callback.from_user
-    product_id = int(callback.data.split("_")[1])
+async def render_product_detail(session, product_id, user_id):
+    """Bangun (teks, keyboard) detail produk.
+
+    Dipakai handler detail katalog dan deep-link /start product_<id> /
+    /start remind_<id> supaya tampilannya selalu sama.
+    """
     product = await crud.get_product_by_id(session=session, product_id=product_id)
-
     if not product:
-        await callback.answer("Produk tidak ditemukan!", show_alert=True)
-        return
+        return None
 
-    db_user = await crud.get_user_by_id(session=session, user_id=user.id)
+    db_user = await crud.get_user_by_id(session=session, user_id=user_id)
     user_balance = float(db_user.balance or 0.0) if db_user else 0.0
 
     is_available = True
     stock_count = await crud.count_available_stock(session=session, product_id=product.id)
 
-    if product.product_type == "TEXT_STOCK":
+    if getattr(product, "is_out_of_stock", False):
+        stock_info = "🔴 <b>Jumlah Stok:</b> <i>Belum Tersedia</i>"
+        is_available = False
+    elif product.product_type == "TEXT_STOCK":
         if stock_count > 0:
             stock_info = f"🟢 <b>Jumlah Stok:</b> <code>{stock_count} Akun / Serial Key</code>"
         else:
@@ -151,15 +151,38 @@ async def cb_show_product_detail(
         f"<i>💡 Pilih opsi pembayaran di bawah untuk memproses pesanan:</i>"
     )
 
+    is_subscribed = False
+    if not is_available:
+        is_subscribed = await crud.is_restock_subscribed(
+            session=session, product_id=product.id, user_id=user_id
+        )
+
+    kb = product_detail_kb(
+        product=product,
+        is_available=is_available,
+        user_balance=user_balance,
+        current_price=float(product.price),
+        is_subscribed=is_subscribed,
+    )
+    return text, kb
+
+
+@router.callback_query(F.data.startswith("prod_"))
+async def cb_show_product_detail(
+    callback: CallbackQuery, session: AsyncSession, state: FSMContext
+) -> None:
+    await state.clear()
+    user = callback.from_user
+    product_id = int(callback.data.split("_")[1])
+    rendered = await render_product_detail(session, product_id, user.id)
+    if not rendered:
+        await callback.answer("Produk tidak ditemukan!", show_alert=True)
+        return
+    text, kb = rendered
     if callback.message:
         await callback.message.edit_text(
             text=text,
-            reply_markup=product_detail_kb(
-                product=product,
-                is_available=is_available,
-                user_balance=user_balance,
-                current_price=float(product.price),
-            ),
+            reply_markup=kb,
             parse_mode="HTML",
         )
     await callback.answer()
@@ -178,7 +201,37 @@ async def cb_subscribe_restock(
         product_id=product_id,
         user_id=callback.from_user.id,
     )
+    await _refresh_product_detail_message(callback, session, product_id)
     await callback.answer(msg, show_alert=True)
+
+
+@router.callback_query(F.data.startswith("restock_unalert_"))
+async def cb_unsubscribe_restock(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    product_id = int(callback.data.replace("restock_unalert_", ""))
+    success, msg = await crud.unsubscribe_restock_alert(
+        session=session,
+        product_id=product_id,
+        user_id=callback.from_user.id,
+    )
+    await _refresh_product_detail_message(callback, session, product_id)
+    await callback.answer(msg, show_alert=True)
+
+
+async def _refresh_product_detail_message(callback, session, product_id) -> None:
+    """Render ulang pesan detail produk (teks + keyboard) setelah tombol
+    pengingat ditekan, supaya tombol langsung berubah (🔔 <-> 🔕)."""
+    if not callback.message:
+        return
+    rendered = await render_product_detail(session, product_id, callback.from_user.id)
+    if not rendered:
+        return
+    text, kb = rendered
+    try:
+        await callback.message.edit_text(text=text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
 
 
 # ==========================================

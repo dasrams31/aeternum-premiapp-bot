@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS products (
     telegram_file_id TEXT,
     vip_chat_id BIGINT,
     is_active BOOLEAN DEFAULT TRUE,
+    is_out_of_stock BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

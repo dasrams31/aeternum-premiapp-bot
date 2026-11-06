@@ -15,6 +15,7 @@ from bot.services.verification import (
 )
 from config import settings
 from database import crud
+from bot.handlers.catalog import render_product_detail
 from bot.keyboards.user_kb import back_to_main_kb, main_menu_kb, referral_menu_kb
 
 router = Router(name="start_router")
@@ -71,6 +72,48 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot) -> None:
                 parse_mode="HTML",
             )
             return
+
+    # Deep-link dari broadcast: /start product_<id> (tombol Beli Sekarang)
+    # atau /start remind_<id> (tombol pengingat di broadcast stok habis).
+    # ref_<id> tetap ditangani seperti sebelumnya di atas.
+    if len(args) > 1:
+        arg = args[1]
+        if arg.startswith("product_") or arg.startswith("remind_"):
+            try:
+                deep_pid = int(arg.split("_", 1)[1])
+            except (ValueError, IndexError):
+                deep_pid = None
+            if deep_pid:
+                if arg.startswith("remind_"):
+                    product = await crud.get_product_by_id(
+                        session=session, product_id=deep_pid
+                    )
+                    if product:
+                        _ok, sub_msg = await crud.subscribe_restock_alert(
+                            session=session, product_id=deep_pid, user_id=user.id
+                        )
+                        rendered = await render_product_detail(session, deep_pid, user.id)
+                        if rendered:
+                            dtext, dkb = rendered
+                            await message.answer(
+                                text=f"{sub_msg}\n\n{dtext}",
+                                reply_markup=dkb,
+                                parse_mode="HTML",
+                            )
+                            return
+                else:
+                    rendered = await render_product_detail(session, deep_pid, user.id)
+                    if rendered:
+                        dtext, dkb = rendered
+                        await message.answer(
+                            text=dtext, reply_markup=dkb, parse_mode="HTML"
+                        )
+                        return
+                await message.answer(
+                    "Produk tidak ditemukan.",
+                    reply_markup=main_menu_kb(is_admin=is_admin),
+                )
+                return
 
     welcome_text = (
         f"👋 Halo <b>{user.first_name}</b>, selamat datang di\n"

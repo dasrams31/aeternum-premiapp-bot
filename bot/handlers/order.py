@@ -65,6 +65,10 @@ async def cb_create_order(
         await callback.answer("Produk tidak tersedia!", show_alert=True)
         return
 
+    if getattr(product, "is_out_of_stock", False):
+        await callback.answer("Stok produk ini belum tersedia!", show_alert=True)
+        return
+
     state_data = await state.get_data()
     promo_code = state_data.get("applied_promo_code")
     discount_amount = state_data.get("applied_discount", 0.0)

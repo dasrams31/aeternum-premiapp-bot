@@ -92,7 +92,9 @@ def categories_kb(categories: List[Category]) -> InlineKeyboardMarkup:
 def products_kb(products_with_stock: List[tuple[Product, int]]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for prod, stock_count in products_with_stock:
-        if prod.product_type == "TEXT_STOCK":
+        if getattr(prod, "is_out_of_stock", False):
+            stock_badge = "🔴 Stok Belum Tersedia"
+        elif prod.product_type == "TEXT_STOCK":
             stock_badge = f"🟢 Stok: {stock_count}" if stock_count > 0 else "🔴 Stok Habis"
         else:
             stock_badge = f"🟢 Stok: {stock_count}" if stock_count > 0 else "⚡ Ready"
@@ -114,6 +116,7 @@ def product_detail_kb(
     user_balance: float = 0.0,
     current_price: float = 0.0,
     has_promo: bool = False,
+    is_subscribed: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     price_to_pay = current_price or float(product.price)
@@ -140,12 +143,20 @@ def product_detail_kb(
                 )
             )
     else:
-        builder.row(
-            InlineKeyboardButton(
-                text="🔔 Ingatkan Saya Saat Restock",
-                callback_data=f"restock_alert_{product.id}"
+        if is_subscribed:
+            builder.row(
+                InlineKeyboardButton(
+                    text="🔕 Batalkan Pengingat",
+                    callback_data=f"restock_unalert_{product.id}"
+                )
             )
-        )
+        else:
+            builder.row(
+                InlineKeyboardButton(
+                    text="🔔 Ingatkan Saya Saat Restock",
+                    callback_data=f"restock_alert_{product.id}"
+                )
+            )
         
     builder.row(
         InlineKeyboardButton(

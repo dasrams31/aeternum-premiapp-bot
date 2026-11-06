@@ -425,13 +425,6 @@ class GoPayDirectGateway:
 
 
 def get_payment_gateway():
-    gw = (settings.PAYMENT_GATEWAY or "klikqris").lower()
-    if gw in ["klikqris", "klik_qris", "klik"]:
-        return KlikQRISGateway()
-    elif gw in ["nirvapay", "nirva", "nirva_pay"]:
-        return NirvaPayGateway()
-    elif gw in ["bayargg", "bayar_gg", "bayar"]:
-        return BayarGGGateway()
-    elif gw in ["tripay"]:
-        return TripayGateway()
-    return GoPayDirectGateway()
+    # Only KlikQRIS is active (user order 2026-10-26).
+    # BayarGG, NirvaPay, Tripay and GoPay are disabled.
+    return KlikQRISGateway()

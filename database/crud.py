@@ -686,6 +686,55 @@ async def get_and_clear_restock_subscribers(
     return user_ids
 
 
+async def get_restock_subscriber_ids(
+    session: AsyncSession, product_id: int
+) -> List[int]:
+    """ID user yang menunggu restock produk ini (TANPA membersihkan daftar).
+
+    Dipakai broadcast_restock_event untuk mengecualikan subscriber dari DM
+    broadcast umum (aturan anti-ganda: subscriber hanya dapat notifikasi
+    subscriber-nya)."""
+    stmt = (
+        select(RestockNotification.user_id)
+        .where(RestockNotification.product_id == product_id)
+        .where(RestockNotification.is_notified.is_(False))
+    )
+    res = await session.execute(stmt)
+    return list(res.scalars().all())
+
+
+async def is_restock_subscribed(
+    session: AsyncSession, product_id: int, user_id: int
+) -> bool:
+    """Apakah user sedang terdaftar sebagai penunggu restock produk ini."""
+    stmt = (
+        select(RestockNotification)
+        .where(RestockNotification.product_id == product_id)
+        .where(RestockNotification.user_id == user_id)
+        .where(RestockNotification.is_notified.is_(False))
+    )
+    existing = (await session.execute(stmt)).scalar_one_or_none()
+    return existing is not None
+
+
+async def unsubscribe_restock_alert(
+    session: AsyncSession, product_id: int, user_id: int
+) -> Tuple[bool, str]:
+    """Membatalkan pengingat restock (tombol 'Batalkan Pengingat')."""
+    stmt = (
+        select(RestockNotification)
+        .where(RestockNotification.product_id == product_id)
+        .where(RestockNotification.user_id == user_id)
+        .where(RestockNotification.is_notified.is_(False))
+    )
+    existing = (await session.execute(stmt)).scalar_one_or_none()
+    if not existing:
+        return False, "Anda belum terdaftar dalam antrian pengingat restock produk ini."
+    await session.delete(existing)
+    await session.commit()
+    return True, "🔕 Pengingat restock dibatalkan."
+
+
 # ==========================================
 # 7. TRANSACTION OPERATIONS & EXPORT
 # ==========================================

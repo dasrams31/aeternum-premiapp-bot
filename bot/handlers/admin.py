@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import crud
-from bot.services.broadcast import broadcast_stock_added
-from bot.services.stock_updater import notify_restock_subscribers
+from bot.services.broadcast import mark_products_known
+from bot.services.stock_updater import broadcast_new_product_event, broadcast_restock_event
 from database.models import Category, Product, PromoCode, Transaction
 from bot.keyboards.admin_kb import (
     admin_main_kb,
@@ -486,7 +486,7 @@ async def process_product_stock(
 
 @router.callback_query(AddProductState.waiting_for_warranty_choice, F.data.startswith("adm_newp_war_"))
 async def cb_pick_new_product_warranty(
-    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot: Bot
 ) -> None:
     if not callback.data:
         return
@@ -496,6 +496,7 @@ async def cb_pick_new_product_warranty(
             target=callback,
             state=state,
             session=session,
+            bot=bot,
             warranty_type="NONE",
             warranty_note="Tidak ada garansi untuk produk ini.",
         )
@@ -504,6 +505,7 @@ async def cb_pick_new_product_warranty(
             target=callback,
             state=state,
             session=session,
+            bot=bot,
             warranty_type="24_HOURS",
             warranty_note="Garansi aktif selama 24 jam setelah pembelian. Penggantian/perbaikan jika kendala login atau error.",
         )
@@ -521,13 +523,14 @@ async def cb_pick_new_product_warranty(
 
 @router.message(AddProductState.waiting_for_warranty_custom)
 async def process_custom_warranty_note(
-    message: Message, state: FSMContext, session: AsyncSession
+    message: Message, state: FSMContext, session: AsyncSession, bot: Bot
 ) -> None:
     note = (message.text or "").strip()
     await finalize_create_product(
         target=message,
         state=state,
         session=session,
+        bot=bot,
         warranty_type="CUSTOM",
         warranty_note=note,
     )
@@ -539,6 +542,7 @@ async def finalize_create_product(
     session: AsyncSession,
     warranty_type: str,
     warranty_note: Optional[str],
+    bot: Bot,
 ) -> None:
     data = await state.get_data()
     p_type = data["product_type"]
@@ -595,6 +599,15 @@ async def finalize_create_product(
             reply_markup=admin_main_kb(),
             parse_mode="HTML",
         )
+
+    # Broadcast produk baru: channel Aeternum + DM semua pengguna.
+    # Produk langsung ditandai known supaya worker harian tidak dobel.
+    if product:
+        try:
+            mark_products_known([product.id])
+            await broadcast_new_product_event(bot, session, product)
+        except Exception as e:
+            logger.warning(f"Gagal broadcast produk baru {product.name}: {e}")
 
 
 # ==========================================
@@ -919,13 +932,17 @@ async def process_stock_paste(
     )
     new_total = await crud.count_available_stock(session=session, product_id=product_id)
 
-    # Trigger Restock Notifier Broadcast ke pembeli yang menunggu
-    # (teks notifikasi terpusat di bot/services/stock_updater.py)
-    notif_sent = 0
-    if product:
-        notif_sent = await notify_restock_subscribers(bot, session, product, new_total)
-        # Broadcast rutin: stok ditambah -> channel Peka
-        await broadcast_stock_added(bot, product, total_added, new_total)
+    # Satu event restock = satu broadcast: channel Aeternum + DM semua user
+    # (kecuali subscriber) + notifikasi subscriber. Flag out-of-stock
+    # dibersihkan dulu supaya tombol Beli Sekarang langsung membuka produk
+    # yang bisa dibeli.
+    event = None
+    if product and new_total > 0 and product.is_out_of_stock:
+        product.is_out_of_stock = False
+        await session.commit()
+    if product and total_added > 0:
+        event = await broadcast_restock_event(bot, session, product, total_added, new_total)
+    notif_sent = event["subscribers_notified"] if event else 0
 
     await state.clear()
     
@@ -941,13 +958,20 @@ async def process_stock_paste(
 
     war_badge = "❌ Tidak Ada Garansi" if (product and product.warranty_type == "NONE") else ("⚡ Garansi 24 Jam" if (product and product.warranty_type == "24_HOURS") else "📝 Custom Garansi")
 
+    bcast_line = ""
+    if event:
+        bcast_line = (
+            f"\n📢 <b>Broadcast:</b> Channel Premich "
+            f"{'✅' if event['channel'] else '❌'} + {event['dm_sent']} DM pengguna"
+        )
+
     await message.answer(
         f"✅ <b>STOK BERHASIL DITAMBAHKAN!</b>\n\n"
         f"📦 <b>Produk:</b> {product.name if product else '-'}\n"
         f"➕ <b>Jumlah Ditambahkan:</b> +{total_added} item\n"
         f"🟢 <b>Total Stok Tersedia:</b> {new_total} item\n"
         f"🛡️ <b>Status Garansi:</b> <b>{war_badge}</b>\n"
-        f"🔔 <b>Notifikasi Restock Terkirim:</b> {notif_sent} Pembeli",
+        f"🔔 <b>Notifikasi Restock Terkirim:</b> {notif_sent} Pembeli{bcast_line}",
         reply_markup=stock_success_kb.as_markup(),
         parse_mode="HTML",
     )
