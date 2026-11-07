@@ -53,6 +53,7 @@ from bot.services.broadcast import (
     build_new_product_broadcast_text,
     build_restock_broadcast_text,
     detect_new_products,
+    digest_kb,
     get_category_name,
     product_buy_kb,
 )
@@ -215,8 +216,8 @@ def build_ready_digest_chunks(ready: List[Tuple[Product, Optional[int], str]]) -
     date_str = datetime.now(WIB).strftime("%d %B %Y")
     header = f"📦 <b>STOK READY HARI INI</b>\n📅 {date_str}"
     footer = (
-        "\nBila berminat, bisa /start lalu buka "
-        "🛍️ Katalog Produk untuk memesan!"
+        "\nBila berminat, ketuk tombol di bawah untuk buka bot, "
+        "lalu pilih 🛍️ Katalog Produk untuk memesan!"
     )
     lines = [header]
     current_cat = None
@@ -277,9 +278,12 @@ async def send_daily_ready_digest(bot: Bot, session) -> Tuple[int, int]:
     sent = 0
     for uid in user_ids:
         ok = True
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
             try:
-                await bot.send_message(chat_id=uid, text=chunk, parse_mode="HTML")
+                kb = digest_kb() if i == len(chunks) - 1 else None
+                await bot.send_message(
+                    chat_id=uid, text=chunk, parse_mode="HTML", reply_markup=kb
+                )
                 sent += 1
                 await asyncio.sleep(0.05)
             except Exception as e:

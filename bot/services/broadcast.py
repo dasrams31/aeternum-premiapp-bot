@@ -72,6 +72,25 @@ def product_buy_kb(product_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def digest_kb() -> InlineKeyboardMarkup:
+    """Tombol [Buka Bot Telegram] di bawah ringkasan stok ready harian.
+
+    Dipasang hanya di chunk terakhir digest, di semua tujuan (channel Peka,
+    channel Aeternum, DM user): tap tombol -> bot terbuka dengan /start,
+    user tinggal buka Katalog Produk untuk memesan.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🛒 Buka Bot Telegram",
+                    url=BOT_DEEP_LINK_BASE,
+                )
+            ]
+        ]
+    )
+
+
 def remind_kb(product_id: int) -> InlineKeyboardMarkup:
     """Tombol [🔔 Ingatkan Saya Saat Restock]: deep-link subscribe pengingat.
 
@@ -242,8 +261,9 @@ async def broadcast_ready_digest_to_channel(bot: Bot, chunks: List[str]) -> int:
     """Kirim ringkasan stok ready harian ke channel Peka (grup ikut dapat
     lewat discussion yang terhubung, tanpa kirim dobel). Kembalikan jumlah pesan terkirim."""
     sent = 0
-    for chunk in chunks:
-        if await send_to_channel(bot, chunk):
+    for i, chunk in enumerate(chunks):
+        kb = digest_kb() if i == len(chunks) - 1 else None
+        if await send_to_channel(bot, chunk, reply_markup=kb):
             sent += 1
             await asyncio.sleep(0.3)
     if sent:
@@ -254,8 +274,9 @@ async def broadcast_ready_digest_to_channel(bot: Bot, chunks: List[str]) -> int:
 async def broadcast_ready_digest_to_aeternum(bot: Bot, chunks: List[str]) -> int:
     """Kirim ringkasan stok ready harian ke channel Aeternum. Kembalikan jumlah pesan terkirim."""
     sent = 0
-    for chunk in chunks:
-        if await send_to_aeternum(bot, chunk):
+    for i, chunk in enumerate(chunks):
+        kb = digest_kb() if i == len(chunks) - 1 else None
+        if await send_to_aeternum(bot, chunk, reply_markup=kb):
             sent += 1
             await asyncio.sleep(0.3)
     if sent:
