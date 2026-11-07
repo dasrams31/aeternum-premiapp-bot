@@ -210,6 +210,30 @@ async def cmd_counts(product_ids):
         print(json.dumps(out))
 
 
+async def cmd_notify_batch(messages):
+    """Send store notifications / admin chats to the admin via PremiBot DM."""
+    from aiogram import Bot
+
+    from config import settings
+
+    bot = Bot(token=settings.BOT_TOKEN)
+    results = []
+    try:
+        for m in messages:
+            try:
+                sent = await bot.send_message(
+                    settings.ADMIN_ID, m["text"], parse_mode="HTML"
+                )
+                results.append(
+                    {"key": m["key"], "ok": True, "message_id": sent.message_id}
+                )
+            except Exception as e:  # noqa: BLE001 - report per message, do not crash the batch
+                results.append({"key": m["key"], "ok": False, "error": str(e)})
+    finally:
+        await bot.session.close()
+    print(json.dumps(results))
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -219,6 +243,7 @@ def main():
     sub.add_parser("mark-processed")
     c = sub.add_parser("counts")
     c.add_argument("--product-ids", required=True)
+    sub.add_parser("notify-batch")
     args = ap.parse_args()
 
     if args.cmd == "fetch-events":
@@ -230,6 +255,9 @@ def main():
     elif args.cmd == "mark-processed":
         ids = json.load(sys.stdin)
         asyncio.run(cmd_mark_processed(ids))
+    elif args.cmd == "notify-batch":
+        messages = json.load(sys.stdin)
+        asyncio.run(cmd_notify_batch(messages))
     elif args.cmd == "counts":
         ids = [int(x) for x in args.product_ids.split(",") if x.strip()]
         asyncio.run(cmd_counts(ids))
