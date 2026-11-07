@@ -48,6 +48,12 @@ from bot.keyboards.admin_kb import (
 
 router = Router(name="admin_router")
 
+# Router-level guard: every handler in this module is admin-only.
+# Non-admin updates never reach any admin handler (the per-handler
+# is_admin_filter checks stay as defense in depth).
+router.message.filter(F.from_user.id == settings.ADMIN_ID)
+router.callback_query.filter(F.from_user.id == settings.ADMIN_ID)
+
 
 def parse_duration(text: str) -> tuple[Optional[int], str]:
     """Mengubah input durasi natural menjadi tuple (duration_days, duration_label)."""
