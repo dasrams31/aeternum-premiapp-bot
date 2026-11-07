@@ -165,6 +165,37 @@ class ProductItem(Base):
     product: Mapped["Product"] = relationship("Product", back_populates="items")
 
 
+class StockSyncEvent(Base):
+    """Outbox stok untuk sinkronisasi dua arah dengan Peka Store (satu pool)."""
+    __tablename__ = "stock_sync_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    product_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # 'delta' | 'set'
+    delta: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    target: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ref: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    processed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class StockSyncApplied(Base):
+    """Event stok dari Store yang sudah diterapkan di bot (idempotency)."""
+    __tablename__ = "stock_sync_applied"
+
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    applied_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class PromoCode(Base):
     __tablename__ = "promo_codes"
 

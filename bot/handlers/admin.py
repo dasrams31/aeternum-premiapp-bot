@@ -9,6 +9,8 @@ from datetime import datetime
 import io
 import logging
 from typing import Optional
+import uuid
+
 from aiogram import Bot, F, Router
 
 logger = logging.getLogger(__name__)
@@ -24,7 +26,7 @@ from config import settings
 from database import crud
 from bot.services.broadcast import mark_products_known
 from bot.services.stock_updater import broadcast_new_product_event, broadcast_restock_event
-from database.models import Category, Product, PromoCode, Transaction
+from database.models import Category, Product, PromoCode, StockSyncEvent, Transaction
 from bot.keyboards.admin_kb import (
     admin_main_kb,
     cancel_admin_action_kb,
@@ -931,6 +933,17 @@ async def process_stock_paste(
         session=session, product_id=product_id, contents=lines
     )
     new_total = await crud.count_available_stock(session=session, product_id=product_id)
+    # Sinkronisasi stok ke Store (satu pool): target absolut jumlah tersedia.
+    session.add(
+        StockSyncEvent(
+            event_id=uuid.uuid4().hex,
+            product_id=product_id,
+            kind="set",
+            target=new_total,
+            ref="paste",
+        )
+    )
+    await session.commit()
 
     # Satu event restock = satu broadcast: channel Aeternum + DM semua user
     # (kecuali subscriber) + notifikasi subscriber. Flag out-of-stock

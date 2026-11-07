@@ -2,6 +2,7 @@
 Aeternum PremiApp Bot - Asynchronous Database CRUD Operations
 """
 
+import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 from sqlalchemy import func, or_, select, update
@@ -16,6 +17,7 @@ from .models import (
     PromoUsage,
     RestockNotification,
     Review,
+    StockSyncEvent,
     Transaction,
     User,
     WarrantyTicket,
@@ -536,6 +538,27 @@ async def clear_all_stock_items(
     return len(items)
 
 
+def _emit_stock_sync_event(
+    session: AsyncSession,
+    product_id: int,
+    kind: str,
+    delta: Optional[int] = None,
+    target: Optional[int] = None,
+    ref: Optional[str] = None,
+) -> StockSyncEvent:
+    """Antrekan event stok ke outbox (ikut commit transaksi pemanggil)."""
+    ev = StockSyncEvent(
+        event_id=uuid.uuid4().hex,
+        product_id=product_id,
+        kind=kind,
+        delta=delta,
+        target=target,
+        ref=ref,
+    )
+    session.add(ev)
+    return ev
+
+
 async def reserve_stock_item_atomic(
     session: AsyncSession, product_id: int, transaction_id: str, duration_minutes: int = 15
 ) -> Optional[ProductItem]:
@@ -559,6 +582,7 @@ async def reserve_stock_item_atomic(
     if item:
         item.reserved_by_trx = transaction_id
         item.reserved_until = now + timedelta(minutes=duration_minutes)
+        _emit_stock_sync_event(session, product_id, "delta", delta=-1, ref=transaction_id)
         await session.commit()
         await session.refresh(item)
 
@@ -568,6 +592,13 @@ async def reserve_stock_item_atomic(
 async def release_reserved_stock(
     session: AsyncSession, transaction_id: str
 ) -> bool:
+    probe = await session.execute(
+        select(ProductItem.product_id)
+        .where(ProductItem.reserved_by_trx == transaction_id)
+        .where(ProductItem.is_sold.is_(False))
+        .limit(1)
+    )
+    product_id = probe.scalar_one_or_none()
     stmt = (
         update(ProductItem)
         .where(ProductItem.reserved_by_trx == transaction_id)
@@ -575,8 +606,11 @@ async def release_reserved_stock(
         .values(reserved_by_trx=None, reserved_until=None)
     )
     res = await session.execute(stmt)
+    released = (res.rowcount or 0) > 0
+    if released and product_id is not None:
+        _emit_stock_sync_event(session, product_id, "delta", delta=1, ref=transaction_id)
     await session.commit()
-    return res.rowcount > 0
+    return released
 
 
 async def finalize_reserved_stock(
@@ -591,6 +625,7 @@ async def finalize_reserved_stock(
     )
     res = await session.execute(stmt)
     item = res.scalar_one_or_none()
+    was_reserved = item is not None
 
     if not item:
         now = datetime.utcnow()
@@ -611,6 +646,9 @@ async def finalize_reserved_stock(
         item = res_fallback.scalar_one_or_none()
 
     if item:
+        if not was_reserved:
+            # Fallback mengambil item tanpa reservasi: belum ada event -1.
+            _emit_stock_sync_event(session, product_id, "delta", delta=-1, ref=transaction_id)
         item.is_sold = True
         item.sold_at = datetime.utcnow()
         item.transaction_id = transaction_id
@@ -626,6 +664,14 @@ async def finalize_reserved_stock(
 
 async def release_all_expired_reservations(session: AsyncSession) -> int:
     now = datetime.utcnow()
+    probe = await session.execute(
+        select(ProductItem.product_id, func.count(ProductItem.id))
+        .where(ProductItem.is_sold.is_(False))
+        .where(ProductItem.reserved_until.is_not(None))
+        .where(ProductItem.reserved_until < now)
+        .group_by(ProductItem.product_id)
+    )
+    per_product = probe.all()
     stmt = (
         update(ProductItem)
         .where(ProductItem.is_sold.is_(False))
@@ -634,8 +680,12 @@ async def release_all_expired_reservations(session: AsyncSession) -> int:
         .values(reserved_by_trx=None, reserved_until=None)
     )
     res = await session.execute(stmt)
+    total = res.rowcount or 0
+    if total > 0:
+        for product_id, count in per_product:
+            _emit_stock_sync_event(session, product_id, "delta", delta=int(count), ref="cleaner")
     await session.commit()
-    return res.rowcount or 0
+    return total
 
 
 # ==========================================
