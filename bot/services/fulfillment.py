@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import crud
 from database.models import Product, PromoCode, Transaction, User
-from bot.keyboards.user_kb import review_prompt_kb
+from config import settings
+from bot.keyboards.user_kb import contact_admin_kb, review_prompt_kb
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ async def deliver_purchased_product(
                 f"🔑 <b>DETAIL KREDENSIAL / LISENSI ANDA:</b>\n\n"
                 f"<code>{delivered_text}</code>\n\n"
                 f"<i>💡 Ketuk kotak abu-abu di atas untuk menyalin langsung.</i>\n"
+                f"📞 <b>Konfirmasi pembelian:</b> @dasrams\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🛡️ <b>KETENTUAN GARANSI:</b>\n"
                 f"<b>{war_badge}</b>{war_desc}\n"
@@ -86,6 +88,7 @@ async def deliver_purchased_product(
                 text=message_text,
                 parse_mode="HTML",
                 protect_content=True,
+                reply_markup=contact_admin_kb(),
             )
 
         # ==========================================
@@ -253,6 +256,38 @@ async def deliver_purchased_product(
             )
         except Exception:
             pass
+
+        # ==========================================
+        # 9. NOTIFIKASI PEMBELIAN KE ADMIN (TEXT_STOCK: konfirmasi manual)
+        # ==========================================
+        if product.product_type == "TEXT_STOCK":
+            try:
+                buyer_label = f"ID {user_id}"
+                if buyer:
+                    if buyer.username:
+                        buyer_label = f"{buyer.first_name or ''} (@{buyer.username})".strip()
+                    elif buyer.first_name:
+                        buyer_label = buyer.first_name
+                remaining = await crud.count_available_stock(session=session, product_id=product.id)
+                wib_now = (datetime.utcnow() + timedelta(hours=7)).strftime("%d %b %Y %H:%M WIB")
+                price_str = f"Rp {float(transaction.amount or 0):,.0f}".replace(",", ".")
+                admin_text = (
+                    f"🛒 <b>PEMBELIAN BARU</b>\n\n"
+                    f"📦 <b>Produk:</b> {product.name}\n"
+                    f"👤 <b>Pembeli:</b> {buyer_label}\n"
+                    f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+                    f"💰 <b>Harga:</b> {price_str}\n"
+                    f"🧾 <b>Invoice:</b> <code>{transaction.id}</code>\n"
+                    f"📦 <b>Sisa stok:</b> {remaining}\n"
+                    f"🕐 <b>Waktu:</b> {wib_now}"
+                )
+                await bot.send_message(
+                    chat_id=settings.ADMIN_ID,
+                    text=admin_text,
+                    parse_mode="HTML",
+                )
+            except Exception:
+                logger.exception(f"Gagal mengirim notifikasi pembelian #{transaction.id} ke admin")
 
         # Catat status transaksi PAID, arsip konten terkirim & masa aktif langganan
         await crud.mark_transaction_paid(

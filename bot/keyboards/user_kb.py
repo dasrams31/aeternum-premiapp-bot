@@ -208,6 +208,15 @@ def review_prompt_kb(invoice_id: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def contact_admin_kb() -> InlineKeyboardMarkup:
+    '''Tombol hubungi admin (URL t.me/dasrams, bisa di-tap).'''
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Hubungi Admin", url="https://t.me/dasrams")]
+        ]
+    )
+
+
 def history_detail_kb(invoice_id: str, is_paid: bool) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if is_paid:

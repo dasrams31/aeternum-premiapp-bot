@@ -275,9 +275,18 @@ async def cb_help(callback: CallbackQuery) -> None:
     )
 
     if callback.message:
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=back_to_main_kb(),
-            parse_mode="HTML",
-        )
+        if callback.message.text:
+            await callback.message.edit_text(
+                text=text,
+                reply_markup=back_to_main_kb(),
+                parse_mode="HTML",
+            )
+        else:
+            # Pesan media (mis. foto invoice QRIS) tidak punya teks:
+            # edit_text gagal, kirim bantuan sebagai pesan baru.
+            await callback.message.answer(
+                text=text,
+                reply_markup=back_to_main_kb(),
+                parse_mode="HTML",
+            )
     await callback.answer()
