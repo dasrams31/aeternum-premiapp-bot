@@ -211,6 +211,21 @@ async def deliver_purchased_product(
                 )
 
         # ==========================================
+        # 6b. POTONG SALDO KOMISI (diskon referral 10%)
+        # ==========================================
+        ref_discount = float(getattr(transaction, "referral_discount", 0.0) or 0.0)
+        if ref_discount > 0:
+            deducted = await crud.deduct_referral_balance_atomic(
+                session=session, user_id=user_id, amount=ref_discount
+            )
+            logger.info(
+                "Diskon saldo komisi order #%s: dijanjikan Rp%s, terpotong Rp%s",
+                transaction.id,
+                ref_discount,
+                deducted,
+            )
+
+        # ==========================================
         # 7. DISTRIBUSI KOMISI REFERRAL (5%)
         # ==========================================
         user_res = await session.execute(select(User).where(User.id == user_id))
@@ -232,7 +247,8 @@ async def deliver_purchased_product(
                             f"💰 <b>KOMISI REFERRAL DITERIMA!</b>\n\n"
                             f"Teman yang Anda undang baru saja membeli <b>{product.name}</b>.\n"
                             f"➕ Saldo Komisi: <b>+{formatted_commission}</b>\n\n"
-                            f"<i>Cek total saldo komisi Anda di menu '👥 Program Afiliasi'.</i>"
+                            f"<i>Saldo komisi bisa dipakai sebagai diskon 10% di pembelianmu berikutnya. "
+                            f"Cek totalnya di menu '👥 Program Afiliasi'.</i>"
                         ),
                         parse_mode="HTML",
                     )

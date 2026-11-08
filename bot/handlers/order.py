@@ -73,6 +73,12 @@ async def cb_create_order(
     promo_code = state_data.get("applied_promo_code")
     discount_amount = state_data.get("applied_discount", 0.0)
     final_amount = state_data.get("final_price", float(product.price))
+    # Diskon saldo komisi: 10% dari harga setelah voucher, dibayar dari
+    # saldo komisi pembeli (dipotong saat pembayaran berhasil).
+    db_user = await crud.get_user_by_id(session=session, user_id=user.id)
+    ref_balance = float(db_user.referral_balance or 0.0) if db_user else 0.0
+    referral_discount = crud.compute_referral_discount(ref_balance, final_amount)
+    final_amount = final_amount - referral_discount
     await state.clear()
 
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M")
@@ -133,6 +139,7 @@ async def cb_create_order(
         amount=final_amount,
         original_amount=float(product.price),
         discount_amount=discount_amount,
+        referral_discount=referral_discount,
         promo_code=promo_code,
         qris_string=qris_payload,
         qris_image_url=qris_url,
@@ -142,13 +149,14 @@ async def cb_create_order(
 
     formatted_price = f"Rp {final_amount:,.0f}".replace(",", ".")
     discount_info = f"\n✂️ <b>Diskon Promo ({promo_code}):</b> -Rp {discount_amount:,.0f}".replace(",", ".") if promo_code else ""
+    ref_info = f"\n💰 <b>Diskon Saldo Komisi (10%):</b> -Rp {referral_discount:,.0f}".replace(",", ".") if referral_discount > 0 else ""
 
     caption_text = (
         f"🧾 <b>INVOICE PEMBAYARAN QRIS RESMI</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🆔 <b>No. Invoice:</b> <code>{invoice_id}</code>\n"
         f"📦 <b>Produk:</b> {product.name}\n"
-        f"💰 <b>Harga Normal:</b> Rp {product.price:,.0f}".replace(",", ".") + f"{discount_info}\n"
+        f"💰 <b>Harga Normal:</b> Rp {product.price:,.0f}".replace(",", ".") + f"{discount_info}{ref_info}\n"
         f"💵 <b>Total Tagihan:</b> <code>{formatted_price}</code>\n"
         f"🔒 <b>Stok:</b> <i>Terkunci untuk Anda (15 Menit)</i>\n"
         f"⏰ <b>Batas Waktu:</b> 15 Menit\n"

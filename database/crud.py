@@ -102,6 +102,39 @@ async def add_user_balance(
     return user
 
 
+def compute_referral_discount(referral_balance: float, amount_after_voucher: float) -> float:
+    """Diskon 10% dari harga setelah voucher, dibayar dari saldo komisi.
+
+    Dibatasi saldo yang tersedia; 0 bila saldo kosong atau harga <= 0.
+    Dibulatkan ke bawah ke rupiah penuh.
+    """
+    if amount_after_voucher <= 0 or referral_balance <= 0:
+        return 0.0
+    return float(min(int(amount_after_voucher // 10), int(referral_balance)))
+
+
+async def deduct_referral_balance_atomic(
+    session: AsyncSession, user_id: int, amount: float
+) -> float:
+    """Potong saldo komisi sebesar amount (dibatasi saldo yang ada, tidak
+    pernah negatif). Kembalikan jumlah yang benar-benar terpotong."""
+    stmt = (
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+    )
+    res = await session.execute(stmt)
+    user = res.scalar_one_or_none()
+    if not user or amount <= 0:
+        return 0.0
+    balance = float(user.referral_balance or 0.0)
+    deducted = min(balance, float(amount))
+    user.referral_balance = balance - deducted
+    await session.commit()
+    await session.refresh(user)
+    return deducted
+
+
 async def deduct_user_balance_atomic(
     session: AsyncSession, user_id: int, amount: float
 ) -> bool:
@@ -798,6 +831,7 @@ async def create_transaction(
     payment_method: str = "QRIS",
     original_amount: float = 0.0,
     discount_amount: float = 0.0,
+    referral_discount: float = 0.0,
     promo_code: Optional[str] = None,
     qris_string: Optional[str] = None,
     qris_image_url: Optional[str] = None,
@@ -813,6 +847,7 @@ async def create_transaction(
         payment_method=payment_method,
         original_amount=original_amount or amount,
         discount_amount=discount_amount,
+        referral_discount=referral_discount,
         promo_code=promo_code,
         amount=amount,
         qris_string=qris_string,

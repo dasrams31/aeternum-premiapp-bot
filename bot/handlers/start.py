@@ -184,7 +184,7 @@ async def cb_show_referral(
         f"<code>{ref_link}</code>\n\n"
         f"<i>(Ketuk link di atas untuk menyalin, lalu bagikan ke teman/grup Anda)</i>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👑 <i>Pencairan saldo diproses langsung oleh Admin Utama @dasrams.</i>"
+        f"💰 <i>Saldo komisi tidak bisa ditarik tunai. Saldo dipakai otomatis sebagai <b>diskon 10%</b> di setiap pembelian produkmu.</i>"
     )
 
     if callback.message:
@@ -198,30 +198,19 @@ async def cb_show_referral(
 
 @router.callback_query(F.data == "user_withdraw_referral")
 async def cb_withdraw_referral(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Penarikan tunai saldo komisi sudah tidak tersedia (aturan baru):
+    saldo komisi hanya dipakai sebagai diskon 10% di tiap pembelian."""
     user = callback.from_user
     db_user = await crud.get_user_by_id(session=session, user_id=user.id)
     balance = float(db_user.referral_balance or 0.0) if db_user else 0.0
-
-    if balance < 10000:
-        await callback.answer(
-            f"Minimal penarikan komisi adalah Rp 10.000. Saldo Anda saat ini: Rp {balance:,.0f}.".replace(",", "."),
-            show_alert=True,
-        )
-        return
-
     text = (
-        f"💳 <b>PENARIKAN KOMISI REFERRAL</b>\n"
+        f"💳 <b>SALDO KOMISI TIDAK BISA DITARIK TUNAI</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"💵 <b>Saldo Komisi Anda:</b> <code>Rp {balance:,.0f}</code>\n\n"
-        f"Untuk mencairkan saldo ke Rekening Bank / E-Wallet (DANA, GoPay, OVO, ShopeePay), silakan hubungi <b>Admin Utama @dasrams</b> dengan format:\n\n"
-        f"<code>Halo Admin @dasrams, saya ingin tarik komisi referral:\n"
-        f"- ID Telegram: {user.id}\n"
-        f"- Nominal: Rp {balance:,.0f}\n"
-        f"- Metode: [BCA / DANA / GoPay / OVO]\n"
-        f"- Nomor Rekening/E-Wallet: [Nomor Anda]\n"
-        f"- Atas Nama: [Nama Pemilik]</code>"
+        f"Saldo komisi tidak bisa dicairkan ke rekening / e-wallet. "
+        f"Saldo dipakai <b>otomatis sebagai diskon 10%</b> di setiap pembelian produk "
+        f"yang Anda lakukan di bot ini, selama saldo masih tersedia."
     ).replace(",", ".")
-
     if callback.message:
         await callback.message.edit_text(
             text=text,

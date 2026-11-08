@@ -83,6 +83,7 @@ async def cb_show_wallet(callback: CallbackQuery, session: AsyncSession) -> None
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"💳 <b>Saldo Belanja Aktif:</b> <code>{fmt_bal}</code>\n"
         f"👥 <b>Saldo Komisi Afiliasi:</b> <code>{fmt_ref}</code>\n"
+        f"<i>Saldo komisi dipakai otomatis sebagai diskon 10% di tiap pembelian produk.</i>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"<i>💡 Keuntungan isi saldo: Anda dapat langsung checkout produk dalam 1 detik tanpa perlu scan QRIS setiap kali transaksi!</i>"
     )
@@ -333,6 +334,12 @@ async def cb_pay_with_balance(
     db_user = await crud.get_user_by_id(session=session, user_id=user.id)
     current_balance = float(db_user.balance or 0.0) if db_user else 0.0
 
+    # Diskon saldo komisi: 10% dari harga setelah voucher, dibayar dari
+    # saldo komisi pembeli (dipotong saat pembayaran berhasil).
+    ref_balance = float(db_user.referral_balance or 0.0) if db_user else 0.0
+    referral_discount = crud.compute_referral_discount(ref_balance, final_amount)
+    final_amount = final_amount - referral_discount
+
     # JIKA SALDO KURANG: Tampilkan layar bantuan topup / bayar QRIS
     if current_balance < final_amount:
         fmt_bal = f"Rp {current_balance:,.0f}".replace(",", ".")
@@ -380,6 +387,7 @@ async def cb_pay_with_balance(
         amount=final_amount,
         original_amount=float(product.price),
         discount_amount=discount_amount,
+        referral_discount=referral_discount,
         promo_code=promo_code,
         trx_type="PURCHASE",
         payment_method="BALANCE",
@@ -393,4 +401,10 @@ async def cb_pay_with_balance(
     if callback.message:
         await callback.message.delete()
 
-    await callback.answer("Pembayaran berhasil dipotong dari saldo!", show_alert=True)
+    if referral_discount > 0:
+        await callback.answer(
+            f"Pembayaran berhasil! Diskon saldo komisi Rp {referral_discount:,.0f} dipakai.".replace(",", "."),
+            show_alert=True,
+        )
+    else:
+        await callback.answer("Pembayaran berhasil dipotong dari saldo!", show_alert=True)

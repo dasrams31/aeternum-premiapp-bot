@@ -255,7 +255,6 @@ def referral_menu_kb(bot_username: str, user_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🚀 Bagikan Link ke Teman", url=share_url)
     )
     builder.row(
-        InlineKeyboardButton(text="💳 Tarik Saldo Komisi", callback_data="user_withdraw_referral"),
         InlineKeyboardButton(text="🏠 Menu Utama", callback_data="back_to_main"),
     )
     return builder.as_markup()

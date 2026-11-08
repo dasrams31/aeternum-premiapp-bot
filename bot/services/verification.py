@@ -54,6 +54,15 @@ async def ensure_verification_columns() -> None:
     logger.info("Kolom verifikasi users dipastikan ada.")
 
 
+async def ensure_referral_discount_column() -> None:
+    """Tambah kolom referral_discount ke tabel transactions bila belum ada (idempotent)."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS referral_discount NUMERIC(12, 2) DEFAULT 0.0")
+        )
+    logger.info("Kolom referral_discount transactions dipastikan ada.")
+
+
 async def check_membership(bot: Bot, user_id: int) -> tuple[bool, bool, bool]:
     """Cek apakah user sudah gabung 3 chat. (in_channel, in_group, in_aeternum)."""
     async def _joined(chat_id: int) -> bool:

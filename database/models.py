@@ -253,6 +253,7 @@ class Transaction(Base):
 
     original_amount: Mapped[float] = mapped_column(Numeric(12, 2), default=0.0)
     discount_amount: Mapped[float] = mapped_column(Numeric(12, 2), default=0.0)
+    referral_discount: Mapped[float] = mapped_column(Numeric(12, 2), default=0.0)
     promo_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     
