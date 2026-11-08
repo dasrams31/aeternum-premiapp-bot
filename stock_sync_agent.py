@@ -9,6 +9,7 @@ Subcommands (JSON in/out):
   apply-events                       read [{event_id, product_id, kind, delta, target}] on stdin
   mark-processed                     read [event_id, ...] on stdin
   counts --product-ids 1,2,3         available (unsold + unreserved) counts per product
+  stock-out --product-id N          broadcast STOK HABIS to the Aeternum channel
 """
 import argparse
 import asyncio
@@ -234,6 +235,48 @@ async def cmd_notify_batch(messages):
     print(json.dumps(results))
 
 
+async def cmd_stock_out(product_id: int):
+    """Broadcast STOK HABIS realtime ke channel Aeternum.
+
+    Dipanggil sync worker saat stok pool (store + bot) suatu produk
+    menyentuh 0. Set flag is_out_of_stock=true dulu supaya updater
+    08:00 tidak melihat flip dan tidak broadcast kedua kali.
+    Keluar 1 bila produk tidak ditemukan, bukan TEXT_STOCK, atau
+    broadcast gagal (worker mencatat ERROR).
+    """
+    from aiogram import Bot
+
+    from bot.services.broadcast import broadcast_stock_out
+    from config import settings
+
+    async with async_session() as s:
+        product = await crud.get_product_by_id(session=s, product_id=product_id)
+        if not product:
+            print(json.dumps({"product_id": product_id, "error": "not found"}))
+            raise SystemExit(1)
+        if product.product_type != "TEXT_STOCK":
+            print(json.dumps({"product_id": product_id, "error": "not TEXT_STOCK"}))
+            raise SystemExit(1)
+        product.is_out_of_stock = True
+        await s.commit()
+        bot = Bot(token=settings.BOT_TOKEN)
+        try:
+            ok = await broadcast_stock_out(bot, s, product)
+        finally:
+            await bot.session.close()
+    print(
+        json.dumps(
+            {
+                "product_id": product_id,
+                "name": product.name,
+                "broadcasted": bool(ok),
+            }
+        )
+    )
+    if not ok:
+        raise SystemExit(1)
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -244,6 +287,8 @@ def main():
     c = sub.add_parser("counts")
     c.add_argument("--product-ids", required=True)
     sub.add_parser("notify-batch")
+    so = sub.add_parser("stock-out")
+    so.add_argument("--product-id", required=True, type=int)
     args = ap.parse_args()
 
     if args.cmd == "fetch-events":
@@ -261,6 +306,8 @@ def main():
     elif args.cmd == "counts":
         ids = [int(x) for x in args.product_ids.split(",") if x.strip()]
         asyncio.run(cmd_counts(ids))
+    elif args.cmd == "stock-out":
+        asyncio.run(cmd_stock_out(args.product_id))
 
 
 if __name__ == "__main__":
