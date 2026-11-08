@@ -12,6 +12,8 @@ Subcommands (JSON in/out):
   stock-out --product-id N          broadcast STOK HABIS to the Aeternum channel
   store-sale                           broadcast a store sale to the Aeternum
                                      channel; read {product, amount, buyer?} on stdin
+  recent-sales                         paid bot purchases (30 days) for the
+                                     store social-proof feed
 """
 import argparse
 import asyncio
@@ -21,7 +23,7 @@ from datetime import datetime
 
 sys.path.insert(0, "/home/ubuntu/aeternum-premiapp-bot")
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, text, update
 
 from database import crud
 from database.connection import async_session
@@ -320,6 +322,41 @@ async def cmd_store_sale(payload):
         raise SystemExit(1)
 
 
+async def cmd_recent_sales():
+    """Paid bot product purchases (last 30 days) for the store
+    social-proof popup. Read-only; prints a JSON list of
+    {id, amount, paid_at, product_id, product_name, buyer}."""
+    async with async_session() as s:
+        res = await s.execute(
+            text(
+                """
+                SELECT t.id, t.amount, t.paid_at,
+                       p.id AS product_id, p.name AS product_name,
+                       u.first_name AS buyer
+                FROM transactions t
+                JOIN products p ON p.id = t.product_id
+                JOIN users u ON u.id = t.user_id
+                WHERE t.trx_type = 'PURCHASE' AND t.status = 'PAID'
+                  AND t.paid_at >= NOW() - INTERVAL '30 days'
+                ORDER BY t.paid_at DESC
+                LIMIT 20
+                """
+            )
+        )
+        rows = [
+            {
+                "id": r.id,
+                "amount": float(r.amount),
+                "paid_at": r.paid_at.isoformat() if r.paid_at else None,
+                "product_id": r.product_id,
+                "product_name": r.product_name,
+                "buyer": r.buyer or "",
+            }
+            for r in res
+        ]
+    print(json.dumps(rows))
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -333,6 +370,7 @@ def main():
     so = sub.add_parser("stock-out")
     so.add_argument("--product-id", required=True, type=int)
     sub.add_parser("store-sale")
+    sub.add_parser("recent-sales")
     args = ap.parse_args()
 
     if args.cmd == "fetch-events":
@@ -355,6 +393,8 @@ def main():
     elif args.cmd == "store-sale":
         payload = json.load(sys.stdin)
         asyncio.run(cmd_store_sale(payload))
+    elif args.cmd == "recent-sales":
+        asyncio.run(cmd_recent_sales())
 
 
 if __name__ == "__main__":
