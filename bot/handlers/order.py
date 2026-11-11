@@ -11,12 +11,12 @@ from typing import Optional
 import qrcode
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, CallbackQuery
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import crud
-from bot.keyboards.user_kb import back_to_main_kb, invoice_kb
+from bot.keyboards.user_kb import back_to_main_kb, contact_admin_kb, invoice_kb
 from bot.services.fulfillment import deliver_purchased_product
 from bot.services.qris import (
     find_available_unique_amount,
@@ -227,6 +227,92 @@ async def cb_check_transaction(
         "⏳ Pembayaran belum terdeteksi. Silakan selesaikan transfer lalu coba kembali dalam beberapa detik.",
         show_alert=True,
     )
+
+
+@router.callback_query(F.data.startswith("confirm_admin_"))
+async def cb_confirm_admin(
+    callback: CallbackQuery, session: AsyncSession, bot: Bot
+) -> None:
+    """Tombol 'Konfirmasi ke Admin' di pesan pembelian (TEXT_STOCK + TEXT_STATIC).
+
+    Pembeli mengetuk tombol ini setelah menerima produk -> admin menerima
+    notifikasi DM berisi identitas pembeli + produk + invoice. Tombol URL
+    'Hubungi Admin' tidak bisa melaporkan kliknya, jadi konfirmasi harus
+    lewat callback di dalam bot. Sekali ketuk per invoice (kolom
+    admin_confirmed_at); ketukan berikutnya dijawab tanpa notifikasi baru,
+    dan tombol konfirmasi dihapus dari pesan pembeli.
+    """
+    invoice_id = callback.data.replace("confirm_admin_", "", 1)
+    trx = await crud.get_transaction_by_id(session=session, transaction_id=invoice_id)
+
+    if not trx:
+        await callback.answer("Invoice tidak ditemukan!", show_alert=True)
+        return
+
+    if callback.from_user.id != trx.user_id:
+        await callback.answer("Tombol ini hanya untuk pembeli pesanan ini.", show_alert=True)
+        return
+
+    if trx.status != "PAID":
+        await callback.answer("Pesanan ini belum lunas.", show_alert=True)
+        return
+
+    if getattr(trx, "admin_confirmed_at", None):
+        await callback.answer("Sudah dikonfirmasi sebelumnya.", show_alert=True)
+        if callback.message:
+            try:
+                await callback.message.edit_reply_markup(reply_markup=contact_admin_kb())
+            except Exception:
+                pass
+        return
+
+    product = await crud.get_product_by_id(session=session, product_id=trx.product_id)
+    buyer = await crud.get_user_by_id(session=session, user_id=trx.user_id)
+
+    trx.admin_confirmed_at = datetime.utcnow()
+    await session.commit()
+
+    buyer_label = f"ID {trx.user_id}"
+    if buyer:
+        if buyer.username:
+            buyer_label = f"{buyer.first_name or ''} (@{buyer.username})".strip()
+        elif buyer.first_name:
+            buyer_label = buyer.first_name
+    price_str = f"Rp {float(trx.amount or 0):,.0f}".replace(",", ".")
+    wib_now = (datetime.utcnow() + timedelta(hours=7)).strftime("%d %b %Y %H:%M WIB")
+    admin_text = (
+        f"💬 <b>KONFIRMASI PEMBELI</b>\n\n"
+        f"📦 <b>Produk:</b> {product.name if product else '-'}\n"
+        f"👤 <b>Pembeli:</b> {buyer_label}\n"
+        f"🆔 <b>ID:</b> <code>{trx.user_id}</code>\n"
+        f"💰 <b>Harga:</b> {price_str}\n"
+        f"🧾 <b>Invoice:</b> <code>{trx.id}</code>\n"
+        f"🕐 <b>Waktu konfirmasi:</b> {wib_now}\n\n"
+        f"<i>Pembeli menekan tombol Konfirmasi ke Admin. Balas lewat tombol chat di bawah.</i>"
+    )
+    markup = None
+    if buyer and buyer.username:
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💬 Chat Pembeli", url=f"https://t.me/{buyer.username}")]
+            ]
+        )
+    try:
+        await bot.send_message(
+            chat_id=settings.ADMIN_ID,
+            text=admin_text,
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
+    except Exception:
+        logger.exception(f"Gagal mengirim konfirmasi pembelian #{trx.id} ke admin")
+
+    if callback.message:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=contact_admin_kb())
+        except Exception:
+            pass
+    await callback.answer("✅ Konfirmasi terkirim ke admin. Silakan chat admin via tombol Hubungi Admin.")
 
 
 @router.callback_query(F.data.startswith("cancel_trx_"))

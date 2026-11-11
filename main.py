@@ -53,12 +53,14 @@ async def main() -> None:
     # 2. Inisialisasi Database Schema
     await init_db()
     from bot.services.verification import (
+        ensure_admin_confirmed_column,
         ensure_referral_discount_column,
         ensure_verification_columns,
     )
 
     await ensure_verification_columns()
     await ensure_referral_discount_column()
+    await ensure_admin_confirmed_column()
 
     # 3. Inisialisasi AiohttpSession
     session = AiohttpSession(timeout=60.0)

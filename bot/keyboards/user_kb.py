@@ -208,13 +208,28 @@ def review_prompt_kb(invoice_id: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def contact_admin_kb() -> InlineKeyboardMarkup:
-    '''Tombol hubungi admin (URL t.me/dasrams, bisa di-tap).'''
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="💬 Hubungi Admin", url="https://t.me/dasrams")]
-        ]
+def contact_admin_kb(invoice_id: Optional[str] = None) -> InlineKeyboardMarkup:
+    '''Tombol hubungi admin (URL t.me/dasrams, bisa di-tap).
+
+    Bila invoice_id diisi, tambah tombol callback "Konfirmasi ke Admin" di
+    atas tombol hubungi admin: ketukan tombol itu mengirim notifikasi
+    konfirmasi pembelian ke admin (tombol URL tidak bisa melaporkan kliknya,
+    jadi konfirmasi harus lewat callback di dalam bot).
+    '''
+    rows = []
+    if invoice_id:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="✅ Konfirmasi ke Admin",
+                    callback_data=f"confirm_admin_{invoice_id}",
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(text="💬 Hubungi Admin", url="https://t.me/dasrams")]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def history_detail_kb(invoice_id: str, is_paid: bool) -> InlineKeyboardMarkup:

@@ -279,6 +279,9 @@ class Transaction(Base):
     expired_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    admin_confirmed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     user: Mapped["User"] = relationship("User", back_populates="transactions")
     product: Mapped[Optional["Product"]] = relationship("Product", back_populates="transactions")

@@ -88,7 +88,7 @@ async def deliver_purchased_product(
                 text=message_text,
                 parse_mode="HTML",
                 protect_content=True,
-                reply_markup=contact_admin_kb(),
+                reply_markup=contact_admin_kb(transaction.id),
             )
 
         # ==========================================
@@ -110,6 +110,7 @@ async def deliver_purchased_product(
                 f"🛡️ <b>KETENTUAN GARANSI:</b>\n"
                 f"<b>{war_badge}</b>{war_desc}\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📞 <b>Konfirmasi pembelian:</b> @dasrams\n"
                 f"Terima kasih telah berbelanja di <b>Aeternum PremiApp Bot</b>!"
             )
 
@@ -118,6 +119,7 @@ async def deliver_purchased_product(
                 text=message_text,
                 parse_mode="HTML",
                 protect_content=True,
+                reply_markup=contact_admin_kb(transaction.id),
             )
 
         # ==========================================

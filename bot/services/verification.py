@@ -63,6 +63,20 @@ async def ensure_referral_discount_column() -> None:
     logger.info("Kolom referral_discount transactions dipastikan ada.")
 
 
+async def ensure_admin_confirmed_column() -> None:
+    """Tambah kolom admin_confirmed_at ke tabel transactions bila belum ada (idempotent).
+
+    Dipakai tombol "Konfirmasi ke Admin" di pesan pembelian: sekali ketuk,
+    kolom ini diisi waktu konfirmasi supaya ketukan berikutnya tidak mengirim
+    notifikasi duplikat ke admin.
+    """
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS admin_confirmed_at TIMESTAMPTZ")
+        )
+    logger.info("Kolom admin_confirmed_at transactions dipastikan ada.")
+
+
 async def check_membership(bot: Bot, user_id: int) -> tuple[bool, bool, bool]:
     """Cek apakah user sudah gabung 3 chat. (in_channel, in_group, in_aeternum)."""
     async def _joined(chat_id: int) -> bool:
