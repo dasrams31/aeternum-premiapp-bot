@@ -5,3 +5,7 @@ __pycache__/
 venv/
 .venv/
 *.log
+backups/
+known_products.txt
+last_digest.txt
+bot/last_digest.txt

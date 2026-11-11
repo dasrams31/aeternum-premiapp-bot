@@ -36,6 +36,7 @@ tidak pernah rusak gara-gara broadcast.
 import asyncio
 import html
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
@@ -56,6 +57,63 @@ BOT_DEEP_LINK_BASE = f"https://t.me/{BOT_USERNAME}"
 
 def _rupiah(price) -> str:
     return f"Rp {float(price):,.0f}".replace(",", ".")
+
+
+async def notify_admin_checkout_attempt(
+    bot: Bot,
+    *,
+    invoice_id: str,
+    product_label: str,
+    amount: float,
+    buyer_id: int,
+    buyer_label: str,
+    buyer_username: Optional[str],
+    gateway_ok: bool,
+) -> bool:
+    """DM admin realtime tiap ada percobaan checkout (invoice QRIS dibuat).
+
+    Dipanggil sekali saat invoice dibuat, baik gateway sukses maupun gagal
+    (QR fallback). Tidak pernah melempar exception ke pemanggil supaya
+    alur checkout tidak pernah rusak gara-gara notifikasi.
+    """
+    wib_now = (datetime.utcnow() + timedelta(hours=7)).strftime("%d %b %Y %H:%M WIB")
+    if gateway_ok:
+        gw_line = "✅ <b>Gateway:</b> OK, QR KlikQRIS terbit."
+    else:
+        gw_line = (
+            "⚠️ <b>Gateway:</b> GAGAL, QR fallback (bukan QR KlikQRIS). "
+            "Pembeli mungkin bayar ke QRIS statis, cek manual."
+        )
+    text = (
+        f"🛒 <b>PERCOBAAN CHECKOUT</b>\n\n"
+        f"📦 <b>Produk:</b> {html.escape(product_label)}\n"
+        f"👤 <b>Pembeli:</b> {html.escape(buyer_label)}\n"
+        f"🆔 <b>ID:</b> <code>{buyer_id}</code>\n"
+        f"💰 <b>Nominal:</b> {_rupiah(amount)}\n"
+        f"🧾 <b>Invoice:</b> <code>{html.escape(invoice_id)}</code>\n"
+        f"💳 <b>Metode:</b> QRIS\n"
+        f"{gw_line}\n"
+        f"🕐 <b>Waktu:</b> {wib_now}\n\n"
+        f"<i>Percobaan checkout baru. Balas lewat tombol chat di bawah.</i>"
+    )
+    markup = None
+    if buyer_username:
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💬 Chat Pembeli", url=f"https://t.me/{buyer_username}")]
+            ]
+        )
+    try:
+        await bot.send_message(
+            chat_id=settings.ADMIN_ID,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
+        return True
+    except Exception:
+        logger.exception(f"Gagal notifikasi checkout #{invoice_id} ke admin")
+        return False
 
 
 def product_buy_kb(product_id: int) -> InlineKeyboardMarkup:

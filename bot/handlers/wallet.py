@@ -23,6 +23,7 @@ from bot.keyboards.user_kb import (
     topup_presets_kb,
     wallet_menu_kb,
 )
+from bot.services.broadcast import notify_admin_checkout_attempt
 from bot.services.fulfillment import deliver_purchased_product
 from bot.services.qris import (
     find_available_unique_amount,
@@ -193,6 +194,25 @@ async def process_custom_amount(
         expired_at=expired_at,
     )
 
+    # Notifikasi realtime ke admin: percobaan top-up (gateway OK maupun QR fallback).
+    try:
+        _buyer = message.from_user
+        _buyer_label = _buyer.first_name or f"ID {_buyer.id}"
+        if _buyer.username:
+            _buyer_label = f"{_buyer.first_name or ''} (@{_buyer.username})".strip()
+        await notify_admin_checkout_attempt(
+            message.bot,
+            invoice_id=invoice_id,
+            product_label="Top Up Saldo",
+            amount=amount,
+            buyer_id=_buyer.id,
+            buyer_label=_buyer_label,
+            buyer_username=_buyer.username,
+            gateway_ok=gateway_ref is not None,
+        )
+    except Exception:
+        logger.exception(f"Gagal notifikasi checkout #{invoice_id} ke admin")
+
     fmt_amount = f"Rp {amount:,.0f}".replace(",", ".")
     caption = (
         f"🧾 <b>INVOICE TOP UP SALDO QRIS</b>\n"
@@ -269,6 +289,24 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
         gateway_reference=gateway_ref,
         expired_at=expired_at,
     )
+
+    # Notifikasi realtime ke admin: percobaan top-up (gateway OK maupun QR fallback).
+    try:
+        _buyer_label = user.first_name or f"ID {user.id}"
+        if user.username:
+            _buyer_label = f"{user.first_name or ''} (@{user.username})".strip()
+        await notify_admin_checkout_attempt(
+            callback.bot,
+            invoice_id=invoice_id,
+            product_label="Top Up Saldo",
+            amount=amount,
+            buyer_id=user.id,
+            buyer_label=_buyer_label,
+            buyer_username=user.username,
+            gateway_ok=gateway_ref is not None,
+        )
+    except Exception:
+        logger.exception(f"Gagal notifikasi checkout #{invoice_id} ke admin")
 
     fmt_amount = f"Rp {amount:,.0f}".replace(",", ".")
     caption = (

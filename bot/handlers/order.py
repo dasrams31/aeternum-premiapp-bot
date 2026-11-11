@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from database import crud
 from bot.keyboards.user_kb import back_to_main_kb, contact_admin_kb, invoice_kb
+from bot.services.broadcast import notify_admin_checkout_attempt
 from bot.services.fulfillment import deliver_purchased_product
 from bot.services.qris import (
     find_available_unique_amount,
@@ -146,6 +147,25 @@ async def cb_create_order(
         gateway_reference=gateway_ref,
         expired_at=expired_at,
     )
+
+    # Notifikasi realtime ke admin: tiap percobaan checkout dilaporkan
+    # langsung (gateway OK maupun QR fallback) supaya admin bisa follow-up.
+    try:
+        _buyer_label = user.first_name or f"ID {user.id}"
+        if user.username:
+            _buyer_label = f"{user.first_name or ''} (@{user.username})".strip()
+        await notify_admin_checkout_attempt(
+            callback.bot,
+            invoice_id=invoice_id,
+            product_label=product.name,
+            amount=final_amount,
+            buyer_id=user.id,
+            buyer_label=_buyer_label,
+            buyer_username=user.username,
+            gateway_ok=gateway_ref is not None,
+        )
+    except Exception:
+        logger.exception(f"Gagal notifikasi checkout #{invoice_id} ke admin")
 
     formatted_price = f"Rp {final_amount:,.0f}".replace(",", ".")
     discount_info = f"\n✂️ <b>Diskon Promo ({promo_code}):</b> -Rp {discount_amount:,.0f}".replace(",", ".") if promo_code else ""
