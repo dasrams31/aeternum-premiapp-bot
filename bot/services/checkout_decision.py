@@ -22,6 +22,9 @@ invoice is created. The three decisions mean:
 All timestamps written here are timezone-aware UTC. Never compare them
 with naive datetimes (the old-server Postgres runs Asia/Shanghai and
 naive utcnow() values land ~8h in the past there).
+
+Since 11 Nov 2026 (user order) invoices NEVER expire: there is no expiry
+guard here anymore; Terima works whenever the status is PENDING.
 """
 
 import logging
@@ -104,8 +107,6 @@ async def process_checkout_decision(
 
     if trx.status != "PENDING":
         return {"ok": False, "code": "unknown_state"}
-    if trx.expired_at is not None and trx.expired_at <= _now_utc():
-        return {"ok": False, "code": "expired"}
 
     # Stamp the decision first, then fulfill. The stamp is what stops a
     # second tap or a concurrent auto-confirm from delivering twice.

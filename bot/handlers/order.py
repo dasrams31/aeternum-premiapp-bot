@@ -84,7 +84,6 @@ async def cb_create_order(
 
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M")
     invoice_id = f"AP-{timestamp}-{user.id % 10000:04d}"
-    expired_at = datetime.utcnow() + timedelta(minutes=15)
 
     # 1. KUNCI STOK SEMENTARA (15 MENIT)
     if product.product_type == "TEXT_STOCK":
@@ -145,7 +144,6 @@ async def cb_create_order(
         qris_string=qris_payload,
         qris_image_url=qris_url,
         gateway_reference=gateway_ref,
-        expired_at=expired_at,
     )
 
     # Notifikasi realtime ke admin: tiap percobaan checkout dilaporkan
@@ -178,14 +176,14 @@ async def cb_create_order(
         f"📦 <b>Produk:</b> {product.name}\n"
         f"💰 <b>Harga Normal:</b> Rp {product.price:,.0f}".replace(",", ".") + f"{discount_info}{ref_info}\n"
         f"💵 <b>Total Tagihan:</b> <code>{formatted_price}</code>\n"
-        f"🔒 <b>Stok:</b> <i>Terkunci untuk Anda (15 Menit)</i>\n"
-        f"⏰ <b>Batas Waktu:</b> 15 Menit\n"
+        f"🔒 <b>Stok:</b> <i>Diamankan untuk pesanan ini</i>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📌 <b>PETUNJUK PEMBAYARAN:</b>\n"
         f"1. Scan kode QR di atas menggunakan GoPay / OVO / DANA / BCA / Livin / ShopeePay.\n"
         f"2. Pastikan nominal transfer <b>TEPAT {formatted_price}</b> (termasuk kode unik).\n"
         f"3. Pembayaran akan terkonfirmasi secara <b>OTOMATIS</b> dalam hitungan detik.\n"
         f"4. Atau tekan tombol <b>🔄 Cek Status Pembayaran</b> di bawah ini.\n"
+        f"5. Kalau pembayaran tidak terkonfirmasi otomatis, kirim bukti bayar lewat tombol <b>📤 Kirim Bukti Pembayaran</b> di bawah ini.\n"
     )
 
     qr_file = get_qr_buffered_file(

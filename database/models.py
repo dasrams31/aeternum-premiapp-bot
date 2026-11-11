@@ -291,6 +291,10 @@ class Transaction(Base):
     manual_rejected_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    payment_proof_file_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    proof_sent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     user: Mapped["User"] = relationship("User", back_populates="transactions")
     product: Mapped[Optional["Product"]] = relationship("Product", back_populates="transactions")

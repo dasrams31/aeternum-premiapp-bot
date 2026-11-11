@@ -1881,7 +1881,6 @@ _DECISION_STAMP = {
     "already_accepted": "ℹ️ <b>Keputusan:</b> Sudah diterima sebelumnya.",
     "already_rejected": "ℹ️ <b>Keputusan:</b> Sudah ditolak sebelumnya.",
     "already_paid": "ℹ️ <b>Keputusan:</b> Sudah lunas dan terkirim otomatis.",
-    "expired": "ℹ️ <b>Keputusan:</b> Invoice sudah kedaluwarsa.",
     "product_missing": "ℹ️ <b>Keputusan:</b> Produk tidak ditemukan.",
     "unknown_state": "ℹ️ <b>Keputusan:</b> Status invoice tidak dikenal.",
     "bad_decision": "ℹ️ <b>Keputusan:</b> Keputusan tidak dikenal.",
@@ -1897,7 +1896,6 @@ _DECISION_ANSWER = {
     "already_accepted": "Sudah diterima sebelumnya.",
     "already_rejected": "Sudah ditolak sebelumnya.",
     "already_paid": "Sudah lunas dan terkirim otomatis.",
-    "expired": "Invoice sudah kedaluwarsa.",
     "product_missing": "Produk tidak ditemukan.",
     "unknown_state": "Status invoice tidak dikenal.",
     "bad_decision": "Keputusan tidak dikenal.",
@@ -1929,11 +1927,20 @@ async def _handle_checkout_decision(
     if callback.message:
         try:
             text = callback.message.html_text + "\n\n" + _DECISION_STAMP.get(code, code)
-            await callback.message.edit_text(
-                text,
-                parse_mode="HTML",
-                reply_markup=_strip_checkout_buttons(callback.message.reply_markup),
-            )
+            markup = _strip_checkout_buttons(callback.message.reply_markup)
+            if callback.message.photo:
+                # Kartu bukti pembayaran adalah foto: stempel ditempel ke caption.
+                await callback.message.edit_caption(
+                    caption=text,
+                    parse_mode="HTML",
+                    reply_markup=markup,
+                )
+            else:
+                await callback.message.edit_text(
+                    text,
+                    parse_mode="HTML",
+                    reply_markup=markup,
+                )
         except Exception:
             pass
     await callback.answer(

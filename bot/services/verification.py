@@ -108,6 +108,23 @@ async def ensure_manual_decision_columns() -> None:
     logger.info("Kolom manual_approved_at/manual_rejected_at transactions dipastikan ada.")
 
 
+async def ensure_payment_proof_columns() -> None:
+    """Tambah kolom bukti pembayaran ke tabel transactions.
+
+    Dipakai alur "Kirim Bukti Pembayaran" di invoice QRIS (beli produk +
+    top-up): payment_proof_file_id menyimpan file_id foto bukti dari
+    pembeli, proof_sent_at mencatat waktu kirim (aware UTC).
+    """
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payment_proof_file_id TEXT")
+        )
+        await conn.execute(
+            text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS proof_sent_at TIMESTAMPTZ")
+        )
+    logger.info("Kolom payment_proof_file_id/proof_sent_at transactions dipastikan ada.")
+
+
 async def check_membership(bot: Bot, user_id: int) -> tuple[bool, bool, bool]:
     """Cek apakah user sudah gabung 3 chat. (in_channel, in_group, in_aeternum)."""
     async def _joined(chat_id: int) -> bool:

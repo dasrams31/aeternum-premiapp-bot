@@ -888,13 +888,16 @@ async def get_transaction_by_id(
 async def get_pending_transaction_by_exact_amount(
     session: AsyncSession, amount: float
 ) -> Optional[Transaction]:
-    """Mencari transaksi PENDING yang belum expired dengan nominal yang cocok."""
+    """Mencari transaksi PENDING dengan nominal yang cocok.
+
+    Invoice tidak lagi kedaluwarsa: expired_at NULL = berlaku selamanya.
+    """
     now = datetime.utcnow()
     stmt = (
         select(Transaction)
         .where(Transaction.status == "PENDING")
         .where(Transaction.amount == amount)
-        .where(Transaction.expired_at > now)
+        .where(or_(Transaction.expired_at.is_(None), Transaction.expired_at > now))
         .order_by(Transaction.created_at.desc())
         .limit(1)
     )

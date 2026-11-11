@@ -19,7 +19,7 @@ from database.connection import init_db
 from bot.middlewares.db_session import DatabaseMiddleware
 from bot.middlewares.error_handler import GlobalErrorMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
-from bot.services.cleaner import start_expired_invoice_cleaner
+from bot.services.cleaner import start_stock_reservation_cleaner
 from bot.services.payment_poller import start_auto_payment_poller
 from bot.services.subscription import start_subscription_reminder_task
 from bot.handlers import broadcast as broadcast_handlers
@@ -32,6 +32,7 @@ from bot.handlers import (
     catalog,
     history,
     order,
+    payment_proof,
     review,
     start,
     wallet,
@@ -56,6 +57,7 @@ async def main() -> None:
         ensure_admin_confirmed_column,
         ensure_issue_reported_column,
         ensure_manual_decision_columns,
+        ensure_payment_proof_columns,
         ensure_referral_discount_column,
         ensure_verification_columns,
     )
@@ -65,6 +67,7 @@ async def main() -> None:
     await ensure_admin_confirmed_column()
     await ensure_issue_reported_column()
     await ensure_manual_decision_columns()
+    await ensure_payment_proof_columns()
 
     # 3. Inisialisasi AiohttpSession
     session = AiohttpSession(timeout=60.0)
@@ -96,6 +99,7 @@ async def main() -> None:
     dp.include_router(catalog.router)
     dp.include_router(wallet.router)
     dp.include_router(order.router)
+    dp.include_router(payment_proof.router)
     dp.include_router(history.router)
     dp.include_router(review.router)
     dp.include_router(warranty.router)
@@ -112,11 +116,11 @@ async def main() -> None:
 
     # 8. Mulai Background Tasks:
     # a. Auto Payment Poller (Deteksi Bayar Otomatis per 6 Detik)
-    # b. Cleaner Invoice Kedaluwarsa
+    # b. Cleaner Reservasi Stok Kedaluwarsa (invoice TIDAK lagi expire)
     # c. Subscription Reminders (H-3 & H-1)
     # d. Daily Stock Updater (sinkron flag ready TEXT_STOCK + notifikasi restock)
     payment_poller_task = asyncio.create_task(start_auto_payment_poller(bot=bot, interval_seconds=6))
-    cleaner_task = asyncio.create_task(start_expired_invoice_cleaner(bot=bot, interval_seconds=15))
+    cleaner_task = asyncio.create_task(start_stock_reservation_cleaner(bot=bot, interval_seconds=15))
     subscription_task = asyncio.create_task(start_subscription_reminder_task(bot=bot, interval_seconds=1800))
     stock_task = asyncio.create_task(start_daily_stock_updater(bot=bot))
     verify_task = asyncio.create_task(start_verification_checker(bot=bot))

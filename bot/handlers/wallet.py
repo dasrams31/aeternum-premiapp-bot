@@ -4,7 +4,7 @@ Terintegrasi langsung dengan Payment Gateway BAYAR GG untuk Top Up Saldo Instan.
 """
 
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime
 import io
 import logging
 from typing import Optional
@@ -152,7 +152,6 @@ async def process_custom_amount(
     await state.clear()
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M")
     invoice_id = f"TOPUP-{timestamp}-{message.from_user.id % 10000:04d}"
-    expired_at = datetime.utcnow() + timedelta(minutes=15)
 
     # Request Real QRIS ke Payment Gateway
     gateway = get_payment_gateway()
@@ -191,7 +190,6 @@ async def process_custom_amount(
         qris_string=qris_payload,
         qris_image_url=qris_url,
         gateway_reference=gateway_ref,
-        expired_at=expired_at,
     )
 
     # Notifikasi realtime ke admin: percobaan top-up (gateway OK maupun QR fallback).
@@ -219,12 +217,12 @@ async def process_custom_amount(
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🆔 <b>No. Invoice:</b> <code>{invoice_id}</code>\n"
         f"💵 <b>Nominal Transfer:</b> <code>{fmt_amount}</code>\n"
-        f"⏰ <b>Batas Waktu:</b> 15 Menit\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📌 <b>PETUNJUK:</b>\n"
         f"1. Scan kode QR di atas.\n"
         f"2. Transfer <b>TEPAT {fmt_amount}</b> (termasuk kode unik).\n"
         f"3. Saldo akan otomatis bertambah ke akun Anda dalam hitungan detik setelah pembayaran berhasil."
+        f"4. Kalau saldo tidak bertambah otomatis, kirim bukti bayar lewat tombol <b>📤 Kirim Bukti Pembayaran</b> di bawah ini."
     )
 
     qr_file = get_qr_buffered_file(
@@ -250,7 +248,6 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
     user = callback.from_user
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M")
     invoice_id = f"TOPUP-{timestamp}-{user.id % 10000:04d}"
-    expired_at = datetime.utcnow() + timedelta(minutes=15)
 
     gateway = get_payment_gateway()
     from config import settings
@@ -287,7 +284,6 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
         qris_string=qris_payload,
         qris_image_url=qris_url,
         gateway_reference=gateway_ref,
-        expired_at=expired_at,
     )
 
     # Notifikasi realtime ke admin: percobaan top-up (gateway OK maupun QR fallback).
@@ -314,12 +310,12 @@ async def create_topup_invoice(callback: CallbackQuery, session: AsyncSession, a
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🆔 <b>No. Invoice:</b> <code>{invoice_id}</code>\n"
         f"💵 <b>Nominal Transfer:</b> <code>{fmt_amount}</code>\n"
-        f"⏰ <b>Batas Waktu:</b> 15 Menit\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📌 <b>PETUNJUK:</b>\n"
         f"1. Scan kode QR di atas.\n"
         f"2. Transfer <b>TEPAT {fmt_amount}</b> (termasuk kode unik).\n"
         f"3. Saldo akan otomatis bertambah ke akun Anda dalam hitungan detik setelah pembayaran berhasil."
+        f"4. Kalau saldo tidak bertambah otomatis, kirim bukti bayar lewat tombol <b>📤 Kirim Bukti Pembayaran</b> di bawah ini."
     )
 
     qr_file = get_qr_buffered_file(

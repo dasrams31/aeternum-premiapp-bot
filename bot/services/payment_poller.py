@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime
 import logging
 from aiogram import Bot
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from database import crud
 from database.connection import async_session
 from database.models import Product, Transaction
@@ -32,11 +32,14 @@ async def start_auto_payment_poller(bot: Bot, interval_seconds: int = 6) -> None
             now = datetime.utcnow()
 
             async with async_session() as session:
-                # Ambil semua transaksi yang masih PENDING dan belum kedaluwarsa
+                # Ambil semua transaksi yang masih PENDING. Invoice tidak
+                # lagi kedaluwarsa: expired_at NULL = berlaku selamanya.
+                # Nilai lama (yang masih terisi) tetap dihormati supaya
+                # invoice lama yang memang sudah lewat tidak hidup lagi.
                 stmt = (
                     select(Transaction)
                     .where(Transaction.status == "PENDING")
-                    .where(Transaction.expired_at > now)
+                    .where(or_(Transaction.expired_at.is_(None), Transaction.expired_at > now))
                     .order_by(Transaction.created_at.desc())
                     .limit(20)
                 )

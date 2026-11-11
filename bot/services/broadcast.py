@@ -139,6 +139,54 @@ async def notify_admin_checkout_attempt(
         return False
 
 
+async def notify_admin_payment_proof(
+    bot: Bot,
+    *,
+    invoice_id: str,
+    product_label: str,
+    amount: float,
+    buyer_id: int,
+    buyer_label: str,
+    buyer_username: Optional[str],
+    proof_file_id: str,
+) -> bool:
+    """DM admin berisi FOTO bukti pembayaran + tombol Terima/Tolak/Abaikan.
+
+    Dipanggil saat pembeli mengirim foto bukti lewat tombol "Kirim Bukti
+    Pembayaran" di invoice QRIS (beli produk / top-up). Keyboard keputusan
+    sama dengan notif PERCOBAAN CHECKOUT, jadi Terima di sini langsung
+    mengirim produk/saldo lewat process_checkout_decision. Tidak pernah
+    melempar exception ke pemanggil.
+    """
+    wib_now = (datetime.utcnow() + timedelta(hours=7)).strftime("%d %b %Y %H:%M WIB")
+    caption = (
+        f"🧾 <b>BUKTI PEMBAYARAN</b>\n\n"
+        f"📦 <b>Produk:</b> {html.escape(product_label)}\n"
+        f"👤 <b>Pembeli:</b> {html.escape(buyer_label)}\n"
+        f"🆔 <b>ID:</b> <code>{buyer_id}</code>\n"
+        f"💰 <b>Nominal:</b> {_rupiah(amount)}\n"
+        f"🧾 <b>Invoice:</b> <code>{html.escape(invoice_id)}</code>\n"
+        f"🕐 <b>Waktu kirim:</b> {wib_now}\n\n"
+        f"⚠️ <b>Keputusan admin:</b> cocokkan foto bukti dengan mutasi/dashboard dulu. "
+        f"Terima langsung mengirim produk/saldo ke pembeli. "
+        f"Tolak = pembeli tidak diberi info apa pun.\n\n"
+        f"<i>Bukti pembayaran dari pembeli. Balas lewat tombol chat di bawah.</i>"
+    )
+    markup = checkout_decision_kb(invoice_id, buyer_username)
+    try:
+        await bot.send_photo(
+            chat_id=settings.ADMIN_ID,
+            photo=proof_file_id,
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
+        return True
+    except Exception:
+        logger.exception(f"Gagal notifikasi bukti bayar #{invoice_id} ke admin")
+        return False
+
+
 def product_buy_kb(product_id: int) -> InlineKeyboardMarkup:
     """Tombol [🛒 Beli Sekarang]: deep-link ke detail produk di bot."""
     return InlineKeyboardMarkup(
