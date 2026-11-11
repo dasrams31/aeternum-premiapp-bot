@@ -4,7 +4,7 @@ Terintegrasi langsung dengan Payment Gateway BAYAR GG (QRIS Dinamis API).
 """
 
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import io
 import logging
 from typing import Optional
@@ -313,6 +313,97 @@ async def cb_confirm_admin(
         except Exception:
             pass
     await callback.answer("✅ Konfirmasi terkirim ke admin. Silakan chat admin via tombol Hubungi Admin.")
+
+
+REPORT_ISSUE_COOLDOWN = timedelta(minutes=10)
+
+
+@router.callback_query(F.data.startswith("report_issue_"))
+async def cb_report_issue(
+    callback: CallbackQuery, session: AsyncSession, bot: Bot
+) -> None:
+    """Tombol 'Ada Kendala? Beri Tahu Admin' di pesan invoice (bayar/top-up).
+
+    Pembeli yang pembayarannya macet/gagal mengetuk tombol ini -> admin
+    menerima notifikasi DM berisi identitas pembeli + invoice + produk, jadi
+    admin tahu siapa yang butuh bantuan tanpa menunggu chat masuk. Satu
+    laporan per 10 menit per invoice (kolom issue_reported_at) supaya admin
+    tidak kebanjiran ketukan berulang.
+    """
+    invoice_id = callback.data.replace("report_issue_", "", 1)
+    trx = await crud.get_transaction_by_id(session=session, transaction_id=invoice_id)
+
+    if not trx:
+        await callback.answer("Invoice tidak ditemukan!", show_alert=True)
+        return
+
+    if callback.from_user.id != trx.user_id:
+        await callback.answer("Tombol ini hanya untuk pemilik pesanan ini.", show_alert=True)
+        return
+
+    last_report = getattr(trx, "issue_reported_at", None)
+    if last_report:
+        # WAJIB aware-UTC: Postgres server ini menafsir datetime naive
+        # sebagai Asia/Shanghai, jadi nilai naive tersimpan 8 jam lebih awal
+        # dan perbandingan cooldown jadi salah (tes: laporan kedua lolos).
+        # Kolom ini selalu ditulis aware (lihat di bawah) dan dibandingkan
+        # dengan jam aware, jadi selisihnya benar.
+        if last_report.tzinfo is None:
+            last_report = last_report.replace(tzinfo=timezone.utc)
+        elapsed = datetime.now(timezone.utc) - last_report
+        if elapsed < REPORT_ISSUE_COOLDOWN:
+            await callback.answer(
+                "Laporanmu sudah dikirim ke admin. Tunggu sebentar ya, admin akan segera merespons.",
+                show_alert=True,
+            )
+            return
+
+    product = None
+    if trx.product_id:
+        product = await crud.get_product_by_id(session=session, product_id=trx.product_id)
+    buyer = await crud.get_user_by_id(session=session, user_id=trx.user_id)
+
+    trx.issue_reported_at = datetime.now(timezone.utc)
+    await session.commit()
+
+    product_name = product.name if product else "Top Up Saldo"
+    buyer_label = f"ID {trx.user_id}"
+    if buyer:
+        if buyer.username:
+            buyer_label = f"{buyer.first_name or ''} (@{buyer.username})".strip()
+        elif buyer.first_name:
+            buyer_label = buyer.first_name
+    price_str = f"Rp {float(trx.amount or 0):,.0f}".replace(",", ".")
+    wib_now = (datetime.utcnow() + timedelta(hours=7)).strftime("%d %b %Y %H:%M WIB")
+    admin_text = (
+        f"⚠️ <b>BUTUH BANTUAN</b>\n\n"
+        f"📦 <b>Produk:</b> {product_name}\n"
+        f"👤 <b>Pembeli:</b> {buyer_label}\n"
+        f"🆔 <b>ID:</b> <code>{trx.user_id}</code>\n"
+        f"💰 <b>Nominal:</b> {price_str}\n"
+        f"🧾 <b>Invoice:</b> <code>{trx.id}</code>\n"
+        f"📌 <b>Status:</b> {trx.status}\n"
+        f"🕐 <b>Waktu laporan:</b> {wib_now}\n\n"
+        f"<i>Pembeli menekan 'Ada Kendala? Beri Tahu Admin' dari pesan invoice. Balas lewat tombol chat di bawah.</i>"
+    )
+    markup = None
+    if buyer and buyer.username:
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💬 Chat Pembeli", url=f"https://t.me/{buyer.username}")]
+            ]
+        )
+    try:
+        await bot.send_message(
+            chat_id=settings.ADMIN_ID,
+            text=admin_text,
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
+    except Exception:
+        logger.exception(f"Gagal mengirim laporan kendala #{trx.id} ke admin")
+
+    await callback.answer("✅ Admin sudah diberitahu. Silakan lanjut chat admin via tombol Hubungi Admin.")
 
 
 @router.callback_query(F.data.startswith("cancel_trx_"))

@@ -77,6 +77,20 @@ async def ensure_admin_confirmed_column() -> None:
     logger.info("Kolom admin_confirmed_at transactions dipastikan ada.")
 
 
+async def ensure_issue_reported_column() -> None:
+    """Tambah kolom issue_reported_at ke tabel transactions bila belum ada (idempotent).
+
+    Dipakai tombol "Ada Kendala? Beri Tahu Admin" di pesan invoice: mencatat
+    waktu laporan terakhir supaya satu invoice hanya bisa melapor sekali per
+    10 menit dan admin tidak kebanjiran notifikasi dari ketukan berulang.
+    """
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS issue_reported_at TIMESTAMPTZ")
+        )
+    logger.info("Kolom issue_reported_at transactions dipastikan ada.")
+
+
 async def check_membership(bot: Bot, user_id: int) -> tuple[bool, bool, bool]:
     """Cek apakah user sudah gabung 3 chat. (in_channel, in_group, in_aeternum)."""
     async def _joined(chat_id: int) -> bool:
