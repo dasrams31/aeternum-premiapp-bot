@@ -188,6 +188,9 @@ def invoice_kb(invoice_id: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🔄 Cek Status Pembayaran", callback_data=f"check_trx_{invoice_id}")
     )
     builder.row(
+        InlineKeyboardButton(text="💬 Hubungi Admin", url="https://t.me/dasrams")
+    )
+    builder.row(
         InlineKeyboardButton(text="❌ Batalkan Pesanan", callback_data=f"cancel_trx_{invoice_id}"),
         InlineKeyboardButton(text="💬 Butuh Bantuan?", callback_data="user_help")
     )
