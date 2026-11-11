@@ -55,6 +55,7 @@ async def main() -> None:
     from bot.services.verification import (
         ensure_admin_confirmed_column,
         ensure_issue_reported_column,
+        ensure_manual_decision_columns,
         ensure_referral_discount_column,
         ensure_verification_columns,
     )
@@ -63,6 +64,7 @@ async def main() -> None:
     await ensure_referral_discount_column()
     await ensure_admin_confirmed_column()
     await ensure_issue_reported_column()
+    await ensure_manual_decision_columns()
 
     # 3. Inisialisasi AiohttpSession
     session = AiohttpSession(timeout=60.0)

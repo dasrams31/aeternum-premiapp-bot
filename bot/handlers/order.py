@@ -226,6 +226,16 @@ async def cb_check_transaction(
         await callback.answer("✅ Pembayaran sudah terkonfirmasi lunas!", show_alert=True)
         return
 
+    if trx.status == "REJECTED":
+        # Ditolak admin secara manual: tetap diam soal penolakan, jawab
+        # sama seperti pembayaran belum terdeteksi supaya pembeli tidak
+        # diberi info apa pun tentang keputusan admin.
+        await callback.answer(
+            "⏳ Pembayaran belum terdeteksi. Silakan selesaikan transfer lalu coba kembali dalam beberapa detik.",
+            show_alert=True,
+        )
+        return
+
     # Cek status live ke server Payment Gateway (BAYAR GG)
     gateway = get_payment_gateway()
     check_ref = trx.gateway_reference or trx.id

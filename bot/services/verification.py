@@ -91,6 +91,23 @@ async def ensure_issue_reported_column() -> None:
     logger.info("Kolom issue_reported_at transactions dipastikan ada.")
 
 
+async def ensure_manual_decision_columns() -> None:
+    """Tambah kolom manual_approved_at + manual_rejected_at ke transactions.
+
+    Dipakai tombol Terima / Tolak di notif checkout admin: mencatat waktu
+    keputusan supaya ketukan ganda atau auto-confirm bersamaan tidak
+    mengirim produk dua kali, dan supaya penolakan bersifat final.
+    """
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS manual_approved_at TIMESTAMPTZ")
+        )
+        await conn.execute(
+            text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS manual_rejected_at TIMESTAMPTZ")
+        )
+    logger.info("Kolom manual_approved_at/manual_rejected_at transactions dipastikan ada.")
+
+
 async def check_membership(bot: Bot, user_id: int) -> tuple[bool, bool, bool]:
     """Cek apakah user sudah gabung 3 chat. (in_channel, in_group, in_aeternum)."""
     async def _joined(chat_id: int) -> bool:

@@ -59,6 +59,33 @@ def _rupiah(price) -> str:
     return f"Rp {float(price):,.0f}".replace(",", ".")
 
 
+def checkout_decision_kb(
+    invoice_id: str, buyer_username: Optional[str]
+) -> InlineKeyboardMarkup:
+    """Tombol keputusan admin di notif checkout: Terima / Tolak / Abaikan.
+
+    Terima HANYA bila pembayaran sudah masuk (cek mutasi/dashboard):
+    Terima langsung mengirim produk/saldo ke pembeli. Tolak menandai
+    invoice REJECTED tanpa info apa pun ke pembeli. Abaikan hanya
+    menutup kartu dan membiarkan invoice apa adanya.
+    """
+    rows: list = []
+    if buyer_username:
+        rows.append(
+            [InlineKeyboardButton(text="💬 Chat Pembeli", url=f"https://t.me/{buyer_username}")]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(text="✅ Terima", callback_data=f"co_acc_{invoice_id}"),
+            InlineKeyboardButton(text="❌ Tolak", callback_data=f"co_rej_{invoice_id}"),
+        ]
+    )
+    rows.append(
+        [InlineKeyboardButton(text="👁 Abaikan", callback_data=f"co_ign_{invoice_id}")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 async def notify_admin_checkout_attempt(
     bot: Bot,
     *,
@@ -94,15 +121,11 @@ async def notify_admin_checkout_attempt(
         f"💳 <b>Metode:</b> QRIS\n"
         f"{gw_line}\n"
         f"🕐 <b>Waktu:</b> {wib_now}\n\n"
+        f"⚠️ <b>Keputusan admin:</b> Terima HANYA bila pembayaran sudah masuk (cek mutasi/dashboard). "
+        f"Terima langsung mengirim produk ke pembeli. Tolak = pembeli tidak diberi info apa pun.\n\n"
         f"<i>Percobaan checkout baru. Balas lewat tombol chat di bawah.</i>"
     )
-    markup = None
-    if buyer_username:
-        markup = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="💬 Chat Pembeli", url=f"https://t.me/{buyer_username}")]
-            ]
-        )
+    markup = checkout_decision_kb(invoice_id, buyer_username)
     try:
         await bot.send_message(
             chat_id=settings.ADMIN_ID,

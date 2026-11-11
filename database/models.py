@@ -285,6 +285,12 @@ class Transaction(Base):
     issue_reported_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    manual_approved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    manual_rejected_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     user: Mapped["User"] = relationship("User", back_populates="transactions")
     product: Mapped[Optional["Product"]] = relationship("Product", back_populates="transactions")

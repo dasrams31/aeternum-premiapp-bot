@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from database import crud
 from bot.services.broadcast import mark_products_known
+from bot.services.checkout_decision import process_checkout_decision
 from bot.services.stock_updater import broadcast_new_product_event, broadcast_restock_event
 from database.models import Category, Product, PromoCode, StockSyncEvent, Transaction
 from bot.keyboards.admin_kb import (
@@ -1856,3 +1857,107 @@ async def show_admin_reports(
             reply_markup=admin_main_kb(),
             parse_mode="HTML",
         )
+
+
+# ======================================================================
+# Keputusan manual checkout: Terima / Tolak / Abaikan (notif PERCOBAAN
+# CHECKOUT ke admin). Router ini sudah difilter khusus admin, jadi hanya
+# admin yang bisa mengetuk tombolnya.
+# ======================================================================
+
+_DECISION_PREFIX = {
+    "accept": "co_acc_",
+    "reject": "co_rej_",
+    "ignore": "co_ign_",
+}
+
+_DECISION_STAMP = {
+    "accepted": "✅ <b>Keputusan:</b> DITERIMA oleh admin, produk dikirim ke pembeli.",
+    "accepted_topup": "✅ <b>Keputusan:</b> DITERIMA oleh admin, saldo masuk ke pembeli.",
+    "delivered_failed": "⚠️ <b>Keputusan:</b> DITERIMA tapi pengiriman GAGAL, cek manual.",
+    "rejected": "❌ <b>Keputusan:</b> DITOLAK oleh admin. Pembeli tidak diberi info.",
+    "ignored": "👁 <b>Keputusan:</b> DIABAIKAN oleh admin, invoice dibiarkan apa adanya.",
+    "not_found": "ℹ️ <b>Keputusan:</b> Invoice tidak ditemukan.",
+    "already_accepted": "ℹ️ <b>Keputusan:</b> Sudah diterima sebelumnya.",
+    "already_rejected": "ℹ️ <b>Keputusan:</b> Sudah ditolak sebelumnya.",
+    "already_paid": "ℹ️ <b>Keputusan:</b> Sudah lunas dan terkirim otomatis.",
+    "expired": "ℹ️ <b>Keputusan:</b> Invoice sudah kedaluwarsa.",
+    "product_missing": "ℹ️ <b>Keputusan:</b> Produk tidak ditemukan.",
+    "unknown_state": "ℹ️ <b>Keputusan:</b> Status invoice tidak dikenal.",
+    "bad_decision": "ℹ️ <b>Keputusan:</b> Keputusan tidak dikenal.",
+}
+
+_DECISION_ANSWER = {
+    "accepted": "✅ Diterima, produk dikirim ke pembeli.",
+    "accepted_topup": "✅ Diterima, saldo masuk ke pembeli.",
+    "delivered_failed": "⚠️ Diterima tapi pengiriman gagal, cek manual.",
+    "rejected": "❌ Ditolak. Pembeli tidak diberi info.",
+    "ignored": "👁 Diabaikan.",
+    "not_found": "Invoice tidak ditemukan!",
+    "already_accepted": "Sudah diterima sebelumnya.",
+    "already_rejected": "Sudah ditolak sebelumnya.",
+    "already_paid": "Sudah lunas dan terkirim otomatis.",
+    "expired": "Invoice sudah kedaluwarsa.",
+    "product_missing": "Produk tidak ditemukan.",
+    "unknown_state": "Status invoice tidak dikenal.",
+    "bad_decision": "Keputusan tidak dikenal.",
+}
+
+
+def _strip_checkout_buttons(markup: Optional[InlineKeyboardMarkup]) -> Optional[InlineKeyboardMarkup]:
+    """Buang baris tombol keputusan, biarkan tombol lain (mis. Chat Pembeli)."""
+    if not markup:
+        return None
+    rows = []
+    for row in markup.inline_keyboard:
+        keep = [
+            b
+            for b in row
+            if not (b.callback_data or "").startswith(("co_acc_", "co_rej_", "co_ign_"))
+        ]
+        if keep:
+            rows.append(keep)
+    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+
+
+async def _handle_checkout_decision(
+    callback: CallbackQuery, session: AsyncSession, bot: Bot, decision: str
+) -> None:
+    invoice_id = callback.data.replace(_DECISION_PREFIX[decision], "", 1)
+    result = await process_checkout_decision(bot, session, invoice_id, decision)
+    code = result.get("code", "unknown_state")
+    if callback.message:
+        try:
+            text = callback.message.html_text + "\n\n" + _DECISION_STAMP.get(code, code)
+            await callback.message.edit_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=_strip_checkout_buttons(callback.message.reply_markup),
+            )
+        except Exception:
+            pass
+    await callback.answer(
+        _DECISION_ANSWER.get(code, code),
+        show_alert=code not in ("accepted", "accepted_topup", "rejected", "ignored"),
+    )
+
+
+@router.callback_query(F.data.startswith("co_acc_"))
+async def cb_checkout_accept(
+    callback: CallbackQuery, session: AsyncSession, bot: Bot
+) -> None:
+    await _handle_checkout_decision(callback, session, bot, "accept")
+
+
+@router.callback_query(F.data.startswith("co_rej_"))
+async def cb_checkout_reject(
+    callback: CallbackQuery, session: AsyncSession, bot: Bot
+) -> None:
+    await _handle_checkout_decision(callback, session, bot, "reject")
+
+
+@router.callback_query(F.data.startswith("co_ign_"))
+async def cb_checkout_ignore(
+    callback: CallbackQuery, session: AsyncSession, bot: Bot
+) -> None:
+    await _handle_checkout_decision(callback, session, bot, "ignore")
