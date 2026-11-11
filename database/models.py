@@ -376,3 +376,45 @@ class RestockNotification(Base):
 
     product: Mapped["Product"] = relationship("Product", back_populates="restock_alerts")
     user: Mapped["User"] = relationship("User", back_populates="restock_alerts")
+
+
+class OrderChat(Base):
+    """Satu thread chat penjual per invoice (pola BWR)."""
+
+    __tablename__ = "order_chats"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    transaction_id: Mapped[str] = mapped_column(
+        String(50), ForeignKey("transactions.id", ondelete="CASCADE"),
+        unique=True, nullable=False, index=True,
+    )
+    buyer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)
+    buyer_unread: Mapped[int] = mapped_column(Integer, default=0)
+    admin_unread: Mapped[int] = mapped_column(Integer, default=0)
+    last_message_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ChatMessage(Base):
+    """Satu pesan di dalam thread order_chats."""
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("order_chats.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    sender_role: Mapped[str] = mapped_column(String(10), nullable=False)
+    sender_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

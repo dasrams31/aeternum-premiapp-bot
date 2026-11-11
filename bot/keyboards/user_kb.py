@@ -241,11 +241,61 @@ def contact_admin_kb(invoice_id: Optional[str] = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def delivery_kb(invoice_id: str, confirmed: bool = False) -> InlineKeyboardMarkup:
+    """Tombol pesan pengiriman sukses, pola BWR.
+
+    Sudah terima (konfirmasi ke admin, sekali per invoice) / Komplain
+    produk / Chat penjual (relay di dalam bot) / Beri rating / Detail
+    pesanan / Kembali ke katalog, ditambah Hubungi Admin (chat manual
+    via t.me/dasrams, tetap ada).
+
+    Bila confirmed=True baris "Sudah terima" dihilangkan (sudah ditekan).
+    """
+    builder = InlineKeyboardBuilder()
+    if not confirmed:
+        builder.row(
+            InlineKeyboardButton(
+                text="📦 Sudah terima",
+                callback_data=f"confirm_admin_{invoice_id}",
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(
+            text="⚠️ Komplain produk",
+            callback_data=f"report_issue_{invoice_id}",
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="💬 Chat penjual", callback_data=f"chat_seller_{invoice_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="⭐ Beri rating", callback_data=f"ask_rate_{invoice_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="🧾 Detail pesanan", callback_data=f"view_hist_{invoice_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="🛍️ Kembali ke katalog", callback_data="user_catalog"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(text="💬 Hubungi Admin", url="https://t.me/dasrams")
+    )
+    return builder.as_markup()
+
+
 def history_detail_kb(invoice_id: str, is_paid: bool) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if is_paid:
         builder.row(
-            InlineKeyboardButton(text="⭐ Beri Ulasan", callback_data=f"prompt_rate_{invoice_id}"),
+            InlineKeyboardButton(text="⭐ Beri Ulasan", callback_data=f"ask_rate_{invoice_id}"),
             InlineKeyboardButton(text="⚠️ Klaim Garansi / Kendala", callback_data=f"claim_warranty_{invoice_id}"),
         )
     builder.row(

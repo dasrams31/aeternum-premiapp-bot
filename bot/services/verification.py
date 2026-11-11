@@ -125,6 +125,55 @@ async def ensure_payment_proof_columns() -> None:
     logger.info("Kolom payment_proof_file_id/proof_sent_at transactions dipastikan ada.")
 
 
+async def ensure_order_chat_tables() -> None:
+    """Buat tabel thread chat penjual (order_chats + chat_messages).
+
+    Dipakai handler order_chat: satu thread per invoice lunas, relay
+    pembeli <-> admin dengan penghitung belum-dibaca per sisi.
+    """
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS order_chats (
+                    id SERIAL PRIMARY KEY,
+                    transaction_id VARCHAR(50) UNIQUE NOT NULL
+                        REFERENCES transactions(id) ON DELETE CASCADE,
+                    buyer_id BIGINT NOT NULL
+                        REFERENCES users(id) ON DELETE CASCADE,
+                    status VARCHAR(20) NOT NULL DEFAULT 'open',
+                    buyer_unread INTEGER NOT NULL DEFAULT 0,
+                    admin_unread INTEGER NOT NULL DEFAULT 0,
+                    last_message_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id SERIAL PRIMARY KEY,
+                    chat_id INTEGER NOT NULL
+                        REFERENCES order_chats(id) ON DELETE CASCADE,
+                    sender_role VARCHAR(10) NOT NULL,
+                    sender_id BIGINT NOT NULL,
+                    text TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_messages_chat_id "
+                "ON chat_messages (chat_id)"
+            )
+        )
+    logger.info("Tabel order_chats/chat_messages dipastikan ada.")
+
+
 async def check_membership(bot: Bot, user_id: int) -> tuple[bool, bool, bool]:
     """Cek apakah user sudah gabung 3 chat. (in_channel, in_group, in_aeternum)."""
     async def _joined(chat_id: int) -> bool:

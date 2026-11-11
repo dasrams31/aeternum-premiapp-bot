@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import crud
 from database.models import Product, PromoCode, Transaction, User
 from config import settings
-from bot.keyboards.user_kb import contact_admin_kb, review_prompt_kb
+from bot.keyboards.user_kb import delivery_kb
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ async def deliver_purchased_product(
                 text=message_text,
                 parse_mode="HTML",
                 protect_content=True,
-                reply_markup=contact_admin_kb(transaction.id),
+                reply_markup=delivery_kb(transaction.id),
             )
 
         # ==========================================
@@ -119,7 +119,7 @@ async def deliver_purchased_product(
                 text=message_text,
                 parse_mode="HTML",
                 protect_content=True,
-                reply_markup=contact_admin_kb(transaction.id),
+                reply_markup=delivery_kb(transaction.id),
             )
 
         # ==========================================
@@ -147,6 +147,7 @@ async def deliver_purchased_product(
                 caption=caption,
                 parse_mode="HTML",
                 protect_content=True,
+                reply_markup=delivery_kb(transaction.id),
             )
             delivered_text = f"FILE:{product.telegram_file_id}"
 
@@ -186,6 +187,7 @@ async def deliver_purchased_product(
                 text=message_text,
                 parse_mode="HTML",
                 protect_content=True,
+                reply_markup=delivery_kb(transaction.id),
             )
 
         # ==========================================
@@ -256,24 +258,6 @@ async def deliver_purchased_product(
                     )
                 except Exception:
                     pass
-
-        # ==========================================
-        # 8. KIRIM PROMPT RATING & ULASAN
-        # ==========================================
-        try:
-            review_prompt_text = (
-                f"⭐ <b>BAGAIMANA PENGALAMAN BERBELANJA ANDA?</b>\n\n"
-                f"Pesanan untuk <b>{product.name}</b> telah selesai.\n"
-                f"Beri kami nilai untuk membantu meningkatkan kualitas layanan kami:"
-            )
-            await bot.send_message(
-                chat_id=user_id,
-                text=review_prompt_text,
-                reply_markup=review_prompt_kb(transaction.id),
-                parse_mode="HTML",
-            )
-        except Exception:
-            pass
 
         # ==========================================
         # 9. NOTIFIKASI PEMBELIAN KE ADMIN (TEXT_STOCK: konfirmasi manual)

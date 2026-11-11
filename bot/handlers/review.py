@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import crud
-from bot.keyboards.user_kb import back_to_main_kb
+from bot.keyboards.user_kb import back_to_main_kb, review_prompt_kb
 
 logger = logging.getLogger(__name__)
 router = Router(name="review_router")
@@ -124,3 +124,48 @@ async def process_review_comment(
             )
         except Exception as e:
             logger.warning(f"Gagal mem-forward testimoni ke channel: {e}")
+
+@router.callback_query(F.data.startswith("ask_rate_"))
+async def cb_ask_rating(
+    callback: CallbackQuery, session: AsyncSession, bot: Bot
+) -> None:
+    """Tombol 'Beri rating' di kartu pengiriman: kirim prompt bintang.
+
+    Menggantikan prompt rating otomatis yang dulu dikirim fulfillment
+    (seksi 8 dihapus): rating sekarang hanya muncul bila pembeli
+    menekannya. Menolak bila ulasan untuk invoice ini sudah ada.
+    """
+    invoice_id = callback.data.replace("ask_rate_", "", 1)
+    trx = await crud.get_transaction_by_id(session=session, transaction_id=invoice_id)
+    if not trx:
+        await callback.answer("Transaksi tidak ditemukan!", show_alert=True)
+        return
+    if callback.from_user.id != trx.user_id:
+        await callback.answer("Tombol ini hanya untuk pembeli pesanan ini.", show_alert=True)
+        return
+    existing_review = await crud.get_review_by_transaction(
+        session=session, transaction_id=invoice_id
+    )
+    if existing_review:
+        await callback.answer(
+            "Anda sudah memberikan ulasan untuk transaksi ini!", show_alert=True
+        )
+        return
+    product = (
+        await crud.get_product_by_id(session=session, product_id=trx.product_id)
+        if trx.product_id
+        else None
+    )
+    prod_name = product.name if product else "Produk Digital"
+    review_prompt_text = (
+        "⭐ <b>BAGAIMANA PENGALAMAN BERBELANJA ANDA?</b>\n\n"
+        f"Pesanan untuk <b>{prod_name}</b> telah selesai.\n"
+        "Beri kami nilai untuk membantu meningkatkan kualitas layanan kami:"
+    )
+    await bot.send_message(
+        chat_id=callback.from_user.id,
+        text=review_prompt_text,
+        reply_markup=review_prompt_kb(trx.id),
+        parse_mode="HTML",
+    )
+    await callback.answer()

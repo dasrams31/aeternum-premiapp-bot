@@ -16,7 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import crud
-from bot.keyboards.user_kb import back_to_main_kb, contact_admin_kb, invoice_kb
+from bot.keyboards.user_kb import (
+    back_to_main_kb,
+    contact_admin_kb,
+    delivery_kb,
+    invoice_kb,
+)
 from bot.services.broadcast import notify_admin_checkout_attempt
 from bot.services.fulfillment import deliver_purchased_product
 from bot.services.qris import (
@@ -261,7 +266,7 @@ async def cb_check_transaction(
 async def cb_confirm_admin(
     callback: CallbackQuery, session: AsyncSession, bot: Bot
 ) -> None:
-    """Tombol 'Konfirmasi ke Admin' di pesan pembelian (TEXT_STOCK + TEXT_STATIC).
+    """Tombol 'Sudah terima' di pesan pengiriman (semua tipe produk).
 
     Pembeli mengetuk tombol ini setelah menerima produk -> admin menerima
     notifikasi DM berisi identitas pembeli + produk + invoice. Tombol URL
@@ -289,7 +294,7 @@ async def cb_confirm_admin(
         await callback.answer("Sudah dikonfirmasi sebelumnya.", show_alert=True)
         if callback.message:
             try:
-                await callback.message.edit_reply_markup(reply_markup=contact_admin_kb())
+                await callback.message.edit_reply_markup(reply_markup=delivery_kb(invoice_id, confirmed=True))
             except Exception:
                 pass
         return
@@ -337,10 +342,10 @@ async def cb_confirm_admin(
 
     if callback.message:
         try:
-            await callback.message.edit_reply_markup(reply_markup=contact_admin_kb())
+            await callback.message.edit_reply_markup(reply_markup=delivery_kb(invoice_id, confirmed=True))
         except Exception:
             pass
-    await callback.answer("✅ Konfirmasi terkirim ke admin. Silakan chat admin via tombol Hubungi Admin.")
+    await callback.answer("✅ Konfirmasi terkirim ke admin. Silakan chat admin via tombol Chat penjual atau Hubungi Admin.")
 
 
 REPORT_ISSUE_COOLDOWN = timedelta(minutes=10)

@@ -32,6 +32,7 @@ from bot.handlers import (
     catalog,
     history,
     order,
+    order_chat,
     payment_proof,
     review,
     start,
@@ -57,6 +58,7 @@ async def main() -> None:
         ensure_admin_confirmed_column,
         ensure_issue_reported_column,
         ensure_manual_decision_columns,
+        ensure_order_chat_tables,
         ensure_payment_proof_columns,
         ensure_referral_discount_column,
         ensure_verification_columns,
@@ -68,6 +70,7 @@ async def main() -> None:
     await ensure_issue_reported_column()
     await ensure_manual_decision_columns()
     await ensure_payment_proof_columns()
+    await ensure_order_chat_tables()
 
     # 3. Inisialisasi AiohttpSession
     session = AiohttpSession(timeout=60.0)
@@ -100,6 +103,7 @@ async def main() -> None:
     dp.include_router(wallet.router)
     dp.include_router(order.router)
     dp.include_router(payment_proof.router)
+    dp.include_router(order_chat.router)
     dp.include_router(history.router)
     dp.include_router(review.router)
     dp.include_router(warranty.router)
