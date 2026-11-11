@@ -581,11 +581,24 @@ async def process_chat_message(
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"{html_escape(text)}"
         )
+        buyer_kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="✍️ Balas", callback_data=f"chat_reply_{invoice_id}"
+                    ),
+                    InlineKeyboardButton(
+                        text="📜 Lihat percakapan",
+                        callback_data=f"chat_seller_{invoice_id}",
+                    ),
+                ]
+            ]
+        )
         try:
             await bot.send_message(
                 chat_id=trx.user_id,
                 text=buyer_text,
-                reply_markup=view_kb,
+                reply_markup=buyer_kb,
                 parse_mode="HTML",
             )
         except Exception:
