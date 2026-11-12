@@ -53,6 +53,7 @@ from bot.services.broadcast import (
     build_new_product_broadcast_text,
     build_restock_broadcast_text,
     detect_new_products,
+    digest_dm_kb,
     digest_kb,
     get_category_name,
     product_buy_kb,
@@ -280,7 +281,7 @@ async def send_daily_ready_digest(bot: Bot, session) -> Tuple[int, int]:
         ok = True
         for i, chunk in enumerate(chunks):
             try:
-                kb = digest_kb() if i == len(chunks) - 1 else None
+                kb = digest_dm_kb() if i == len(chunks) - 1 else None
                 await bot.send_message(
                     chat_id=uid, text=chunk, parse_mode="HTML", reply_markup=kb
                 )

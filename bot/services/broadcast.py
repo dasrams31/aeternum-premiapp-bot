@@ -220,6 +220,27 @@ def digest_kb() -> InlineKeyboardMarkup:
     )
 
 
+def digest_dm_kb() -> InlineKeyboardMarkup:
+    """Tombol [Belanja Sekarang] di bawah ringkasan stok ready harian, KHUSUS DM user.
+
+    Hanya dipakai di DM digest ke user yang sudah /start bot: tap tombol ->
+    bot terbuka dengan /start shop -> menu utama muncul lagi (/start ulang),
+    user langsung bisa buka Katalog Produk. Argumen 'shop' tidak dikenali
+    handler /start, jadi jatuh ke menu utama biasa. Channel tetap pakai
+    digest_kb() ('Buka Bot Telegram').
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🛒 Belanja Sekarang",
+                    url=f"{BOT_DEEP_LINK_BASE}?start=shop",
+                )
+            ]
+        ]
+    )
+
+
 def remind_kb(product_id: int) -> InlineKeyboardMarkup:
     """Tombol [🔔 Ingatkan Saya Saat Restock]: deep-link subscribe pengingat.
 
