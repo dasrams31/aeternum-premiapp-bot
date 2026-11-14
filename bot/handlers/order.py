@@ -323,13 +323,27 @@ async def cb_confirm_admin(
         f"🕐 <b>Waktu konfirmasi:</b> {wib_now}\n\n"
         f"<i>Pembeli menekan tombol Konfirmasi ke Admin. Balas lewat tombol chat di bawah.</i>"
     )
-    markup = None
+    # Tombol chat SELALU ada: thread order-chat (chat_seller_) jalan untuk
+    # admin tanpa peduli pembeli punya username atau tidak. Bila pembeli
+    # punya username, tambah juga tombol langsung ke DM Telegram-nya.
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="💬 Balas via Chat Bot",
+                callback_data=f"chat_seller_{trx.id}",
+            )
+        ]
+    ]
     if buyer and buyer.username:
-        markup = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="💬 Chat Pembeli", url=f"https://t.me/{buyer.username}")]
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="📱 Chat Pembeli (Telegram)",
+                    url=f"https://t.me/{buyer.username}",
+                )
             ]
         )
+    markup = InlineKeyboardMarkup(inline_keyboard=rows)
     try:
         await bot.send_message(
             chat_id=settings.ADMIN_ID,
@@ -419,13 +433,27 @@ async def cb_report_issue(
         f"🕐 <b>Waktu laporan:</b> {wib_now}\n\n"
         f"<i>Pembeli menekan 'Ada Kendala? Beri Tahu Admin' dari pesan invoice. Balas lewat tombol chat di bawah.</i>"
     )
-    markup = None
+    # Tombol chat SELALU ada: thread order-chat (chat_seller_) jalan untuk
+    # admin tanpa peduli pembeli punya username atau tidak. Bila pembeli
+    # punya username, tambah juga tombol langsung ke DM Telegram-nya.
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="💬 Balas via Chat Bot",
+                callback_data=f"chat_seller_{trx.id}",
+            )
+        ]
+    ]
     if buyer and buyer.username:
-        markup = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="💬 Chat Pembeli", url=f"https://t.me/{buyer.username}")]
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="📱 Chat Pembeli (Telegram)",
+                    url=f"https://t.me/{buyer.username}",
+                )
             ]
         )
+    markup = InlineKeyboardMarkup(inline_keyboard=rows)
     try:
         await bot.send_message(
             chat_id=settings.ADMIN_ID,
