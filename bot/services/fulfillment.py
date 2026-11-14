@@ -5,7 +5,10 @@ Pengiriman produk instan, finalisasi stok terjual permanen, masa aktif langganan
 
 from datetime import datetime, timedelta
 import logging
+import os
+import re
 from aiogram import Bot
+from aiogram.types import FSInputFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +18,65 @@ from config import settings
 from bot.keyboards.user_kb import delivery_kb
 
 logger = logging.getLogger(__name__)
+
+# Folder toko di server ini yang menyimpan zip script (sumber DOWNLOAD_URL di item).
+SHOP_DOWNLOADS_DIR = "/home/ubuntu/aeterra-shop/public/downloads"
+
+# Produk TEXT_STOCK yang itemnya bukan DOWNLOAD_URL tapi tetap punya zip script.
+# Kunci: product.id, nilai: nama file zip di SHOP_DOWNLOADS_DIR.
+PRODUCT_ZIP_FALLBACK = {
+    65: "script-py-kirofarm-gsuite.zip",  # KiroFarm GSuite
+}
+
+
+def _resolve_script_zip(product_id: int, delivered_text: str) -> str | None:
+    """Cari file zip script untuk pembelian ini; None bila tidak ada."""
+    match = re.search(r"DOWNLOAD_URL::(https?://\S+)", delivered_text or "")
+    if match:
+        filename = match.group(1).rstrip("/").rsplit("/", 1)[-1]
+        path = os.path.join(SHOP_DOWNLOADS_DIR, filename)
+        if os.path.isfile(path):
+            return path
+        logger.warning("Zip script %s tidak ada di %s", filename, SHOP_DOWNLOADS_DIR)
+    fallback = PRODUCT_ZIP_FALLBACK.get(product_id)
+    if fallback:
+        path = os.path.join(SHOP_DOWNLOADS_DIR, fallback)
+        if os.path.isfile(path):
+            return path
+        logger.warning("Zip fallback %s tidak ada di %s", fallback, SHOP_DOWNLOADS_DIR)
+    return None
+
+
+async def _send_script_zip(
+    bot: Bot,
+    user_id: int,
+    product: Product,
+    transaction_id: str,
+    delivered_text: str,
+) -> bool:
+    """Kirim zip script menyusul pesan teks delivery. Tidak pernah raise."""
+    try:
+        zip_path = _resolve_script_zip(product.id, delivered_text)
+        if not zip_path:
+            return False
+        caption = (
+            f"📦 <b>File Script: {product.name}</b>\n\n"
+            f"🧾 <b>No. Invoice:</b> <code>{transaction_id}</code>\n\n"
+            "File scriptnya terlampir di atas. Panduan pemakaiannya ada di pesan sebelumnya.\n\n"
+            "📞 <b>Konfirmasi pembelian:</b> @dasrams"
+        )
+        await bot.send_document(
+            chat_id=user_id,
+            document=FSInputFile(zip_path),
+            caption=caption,
+            parse_mode="HTML",
+            protect_content=True,
+        )
+        logger.info("Zip script terkirim untuk order #%s: %s", transaction_id, zip_path)
+        return True
+    except Exception:
+        logger.exception("Gagal mengirim zip script untuk order #%s", transaction_id)
+        return False
 
 
 async def deliver_purchased_product(
@@ -89,6 +151,16 @@ async def deliver_purchased_product(
                 parse_mode="HTML",
                 protect_content=True,
                 reply_markup=delivery_kb(transaction.id),
+            )
+
+            # Kirim zip script menyusul (hanya produk script yang punya file).
+            # Gagal kirim zip tidak membatalkan delivery teks yang sudah sukses.
+            await _send_script_zip(
+                bot=bot,
+                user_id=user_id,
+                product=product,
+                transaction_id=transaction.id,
+                delivered_text=delivered_text,
             )
 
         # ==========================================
