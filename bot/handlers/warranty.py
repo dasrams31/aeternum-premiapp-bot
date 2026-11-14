@@ -212,6 +212,58 @@ async def process_admin_replacement(
             await message.answer(f"⚠️ Gagal mengirim ke pembeli: {e}")
 
 
+@router.callback_query(F.data.startswith("adm_reply_"))
+async def cb_admin_start_reply(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    """Admin ingin membalas pesan pelapor tiket."""
+    ticket_code = callback.data.replace("adm_reply_", "")
+    await state.update_data(target_ticket=ticket_code)
+    await state.set_state(AdminReplyTicketState.waiting_for_reply_text)
+
+    await callback.message.answer(
+        f"\U0001f4ac <b>BALAS PESAN UNTUK TIKET #{ticket_code}</b>\n\n"
+        f"Silakan ketik pesan balasan yang akan dikirim ke pembeli:",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(AdminReplyTicketState.waiting_for_reply_text)
+async def process_admin_reply(
+    message: Message, state: FSMContext, session: AsyncSession, bot: Bot
+) -> None:
+    if not message.text:
+        await message.answer("\u26a0\ufe0f Kirim balasan dalam bentuk teks.")
+        return
+    reply_text = message.text.strip()
+    data = await state.get_data()
+    ticket_code = data["target_ticket"]
+    await state.clear()
+
+    ticket = await crud.get_warranty_ticket_by_code(
+        session=session, ticket_code=ticket_code
+    )
+    if not ticket:
+        await message.answer(f"\u26a0\ufe0f Tiket #{ticket_code} tidak ditemukan.")
+        return
+
+    buyer_msg = (
+        f"\U0001f4ac <b>BALASAN ADMIN UNTUK KLAIM GARANSI #{ticket_code}</b>\n\n"
+        f"{reply_text}\n\n"
+        f"<i>Jika masih ada kendala, silakan balas di chat ini atau hubungi @dasrams.</i>"
+    )
+    try:
+        await bot.send_message(
+            chat_id=ticket.user_id,
+            text=buyer_msg,
+            parse_mode="HTML",
+        )
+        await message.answer(f"\u2705 Pesan balasan berhasil dikirim ke pembeli untuk tiket #{ticket_code}!")
+    except Exception as e:
+        await message.answer(f"\u26a0\ufe0f Gagal mengirim ke pembeli: {e}")
+
+
 @router.callback_query(F.data.startswith("adm_reject_"))
 async def cb_admin_reject_ticket(
     callback: CallbackQuery, session: AsyncSession, bot: Bot
