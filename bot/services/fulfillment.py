@@ -167,7 +167,7 @@ async def deliver_purchased_product(
         # 2. TIPE: TEXT_STATIC
         # ==========================================
         elif product.product_type == "TEXT_STATIC":
-            delivered_text = product.text_content or "Tidak ada teks konten."
+            delivered_text = product.text_content or "Silahkan chat admin melalui bot atau melalui @dasrams untuk aktivasi/konfirmasi akun."
             war_badge = "❌ Tidak Ada Garansi" if product.warranty_type == "NONE" else ("⚡ Garansi 24 Jam" if product.warranty_type == "24_HOURS" else "📝 Garansi Khusus")
             war_desc = f"\n<i>{product.warranty_note}</i>" if product.warranty_note else ""
 
