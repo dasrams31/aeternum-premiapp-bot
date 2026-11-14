@@ -10,6 +10,10 @@ Subcommands (JSON in/out):
   mark-processed                     read [event_id, ...] on stdin
   counts --product-ids 1,2,3         available (unsold + unreserved) counts per product
   stock-out --product-id N          broadcast STOK HABIS to the Aeternum channel
+  restock --product-id N --added A --total T
+                                     broadcast STOK DITAMBAH (channel + DM semua
+                                     user + notifikasi subscriber), dipakai sync
+                                     worker saat event restock diterapkan
   store-sale                           broadcast a store sale to the Aeternum
                                      channel; read {product, amount, buyer?} on stdin
   recent-sales                         paid bot purchases (30 days) for the
@@ -281,6 +285,55 @@ async def cmd_stock_out(product_id: int):
         raise SystemExit(1)
 
 
+async def cmd_restock(product_id: int, added: int, total: int):
+    """Broadcast STOK DITAMBAH realtime ke channel Aeternum + DM semua user.
+
+    Dipanggil sync worker saat sebuah event restock (tambah stok) diterapkan
+    ke produk ini. Memakai broadcast_restock_event yang sama dengan alur
+    admin tambah stok. Keluar 1 bila produk tidak ditemukan, bukan
+    TEXT_STOCK, atau broadcast channel gagal (worker mencatat ERROR).
+    """
+    from aiogram import Bot
+
+    from bot.services.stock_updater import broadcast_restock_event
+    from config import settings
+
+    async with async_session() as s:
+        product = await crud.get_product_by_id(session=s, product_id=product_id)
+        if not product:
+            print(json.dumps({"product_id": product_id, "error": "not found"}))
+            raise SystemExit(1)
+        if product.product_type != "TEXT_STOCK":
+            print(json.dumps({"product_id": product_id, "error": "not TEXT_STOCK"}))
+            raise SystemExit(1)
+        if product.is_out_of_stock:
+            product.is_out_of_stock = False
+            await s.commit()
+        bot = Bot(token=settings.BOT_TOKEN)
+        try:
+            res = await broadcast_restock_event(
+                bot, s, product, int(added), int(total)
+            )
+        finally:
+            await bot.session.close()
+    print(
+        json.dumps(
+            {
+                "product_id": product_id,
+                "name": product.name,
+                "added": int(added),
+                "total": int(total),
+                "channel": res.get("channel"),
+                "dm_sent": res.get("dm_sent"),
+                "dm_failed": res.get("dm_failed"),
+                "subscribers_notified": res.get("subscribers_notified"),
+            }
+        )
+    )
+    if not res.get("channel"):
+        raise SystemExit(1)
+
+
 async def cmd_store_sale(payload):
     """Broadcast a store sale to the Aeternum channel, same format as a
     bot purchase (broadcast_transaction_success). Reads
@@ -369,6 +422,10 @@ def main():
     sub.add_parser("notify-batch")
     so = sub.add_parser("stock-out")
     so.add_argument("--product-id", required=True, type=int)
+    rs = sub.add_parser("restock")
+    rs.add_argument("--product-id", required=True, type=int)
+    rs.add_argument("--added", required=True, type=int)
+    rs.add_argument("--total", required=True, type=int)
     sub.add_parser("store-sale")
     sub.add_parser("recent-sales")
     args = ap.parse_args()
@@ -390,6 +447,8 @@ def main():
         asyncio.run(cmd_counts(ids))
     elif args.cmd == "stock-out":
         asyncio.run(cmd_stock_out(args.product_id))
+    elif args.cmd == "restock":
+        asyncio.run(cmd_restock(args.product_id, args.added, args.total))
     elif args.cmd == "store-sale":
         payload = json.load(sys.stdin)
         asyncio.run(cmd_store_sale(payload))

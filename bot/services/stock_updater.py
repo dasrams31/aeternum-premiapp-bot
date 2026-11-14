@@ -109,8 +109,9 @@ async def broadcast_restock_event(
     """SATU event restock = SATU broadcast: channel Aeternum + DM semua user
     (kecuali subscriber produk itu) + notifikasi subscriber.
 
-    Dipanggil dari alur admin tambah stok (aksi nyata), bukan dari sync
-    berkala. `test_label` (mis. "[TEST]") hanya untuk pengujian: ditempel di
+    Dipanggil dari alur admin tambah stok dan dari sync worker saat sebuah
+    event restock diterapkan (tambah stok via store). `test_label` (mis.
+    "[TEST]") hanya untuk pengujian: ditempel di
     depan teks broadcast. Kembalikan ringkasan hitungan pengiriman.
     """
     channel_ok = await broadcast_stock_added(
