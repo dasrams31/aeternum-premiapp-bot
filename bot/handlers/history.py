@@ -3,17 +3,18 @@ Aeternum PremiApp Bot - Order History Handlers
 """
 
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import crud
-from bot.keyboards.user_kb import back_to_main_kb, history_detail_kb, history_list_kb
+from bot.keyboards.user_kb import NAV_HISTORY, back_to_main_kb, history_detail_kb, history_list_kb
 
 router = Router(name="history_router")
 
 
 @router.message(Command("riwayat"))
+@router.message(StateFilter(None), F.text == NAV_HISTORY)
 @router.callback_query(F.data == "user_history")
 async def show_user_history(
     event: Message | CallbackQuery, session: AsyncSession

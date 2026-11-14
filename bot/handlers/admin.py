@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import crud
+from bot.keyboards.user_kb import NAV_ADMIN
 from bot.services.broadcast import mark_products_known
 from bot.services.checkout_decision import process_checkout_decision
 from bot.services.stock_updater import broadcast_new_product_event, broadcast_restock_event
@@ -149,6 +150,7 @@ def is_admin_filter(user_id: int) -> bool:
 
 
 @router.message(Command("admin"))
+@router.message(StateFilter(None), F.text == NAV_ADMIN)
 @router.callback_query(F.data == "admin_dashboard")
 async def show_admin_dashboard(
     event: Message | CallbackQuery, state: FSMContext

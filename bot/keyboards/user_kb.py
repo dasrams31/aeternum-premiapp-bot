@@ -3,11 +3,36 @@ Aeternum PremiApp Bot - Keyboard Antarmuka Pengguna (User UI & MiniApp)
 """
 
 from typing import List, Optional
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    WebAppInfo,
+)
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 from config import settings
 from database.models import Category, Product, Transaction
+
+
+# Label tombol keyboard navigasi persisten (ReplyKeyboardMarkup).
+# Satu sumber kebenaran: dipakai main_reply_kb() dan filter F.text handler.
+NAV_CATALOG = "🛍️ Katalog Produk"
+NAV_DEPOSIT = "💰 Deposit"
+NAV_VOUCHER = "🎟️ Voucher"
+NAV_HISTORY = "📜 Riwayat Pesanan"
+NAV_HOW_TO_BUY = "💎 Cara Pembelian"
+NAV_INFO = "ℹ️ Informasi"
+NAV_REFERRAL = "👥 Afiliasi"
+NAV_HELP = "💬 Bantuan / CS"
+NAV_WEBSTORE = "🚀 Web Store Aeternum"
+NAV_ADMIN = "⚙️ Panel Admin Toko"
+
+NAV_INTRO_TEXT = (
+    "🧭 <b>NAVIGASI CEPAT</b>\n\n"
+    "Tombol di bawah kolom chat selalu tersedia. Ketuk untuk berpindah menu tanpa mengetik perintah."
+)
 
 
 def get_miniapp_url() -> Optional[str]:
@@ -45,6 +70,57 @@ def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
         builder.row(
             InlineKeyboardButton(text="⚙️ Panel Admin Toko", callback_data="admin_dashboard")
         )
+    return builder.as_markup()
+
+
+def main_reply_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
+    """Keyboard navigasi persisten di bawah kolom chat (ReplyKeyboardMarkup).
+
+    Tombol mengirim labelnya sebagai pesan teks; tiap label ditangani handler
+    pesan dengan StateFilter(None) supaya tidak mengganggu alur FSM yang
+    sedang berjalan (kode promo, klaim garansi, nominal top-up, dll).
+    Reply keyboard Telegram tidak bisa membawa tombol URL, jadi Web Store
+    dibuka lewat pesan berisi tombol inline URL.
+    """
+    builder = ReplyKeyboardBuilder()
+    builder.row(
+        KeyboardButton(text=NAV_CATALOG),
+        KeyboardButton(text=NAV_DEPOSIT),
+    )
+    builder.row(
+        KeyboardButton(text=NAV_VOUCHER),
+        KeyboardButton(text=NAV_HISTORY),
+    )
+    builder.row(
+        KeyboardButton(text=NAV_HOW_TO_BUY),
+        KeyboardButton(text=NAV_INFO),
+    )
+    builder.row(
+        KeyboardButton(text=NAV_REFERRAL),
+        KeyboardButton(text=NAV_HELP),
+    )
+    builder.row(
+        KeyboardButton(text=NAV_WEBSTORE),
+    )
+    if is_admin:
+        builder.row(
+            KeyboardButton(text=NAV_ADMIN),
+        )
+    return builder.as_markup(
+        resize_keyboard=True,
+        input_field_placeholder="Pilih menu...",
+    )
+
+
+def webstore_kb() -> InlineKeyboardMarkup:
+    """Tombol inline URL ke Web Store (balasan tombol navigasi Web Store)."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="🚀 Buka Web Store Aeternum",
+            url="https://shop.dasrams.biz.id",
+        )
+    )
     return builder.as_markup()
 
 

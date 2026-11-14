@@ -6,7 +6,7 @@ from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.keyboards.user_kb import main_menu_kb
+from bot.keyboards.user_kb import NAV_INTRO_TEXT, main_menu_kb, main_reply_kb
 from bot.services.verification import (
     check_membership,
     mark_verified,
@@ -36,6 +36,11 @@ async def cb_verify_check(callback: CallbackQuery, session: AsyncSession, bot: B
             await callback.message.edit_text(
                 text=text,
                 reply_markup=main_menu_kb(is_admin=is_admin),
+                parse_mode="HTML",
+            )
+            await callback.message.answer(
+                text=NAV_INTRO_TEXT,
+                reply_markup=main_reply_kb(is_admin=is_admin),
                 parse_mode="HTML",
             )
         await callback.answer("Verifikasi berhasil! Selamat datang.")

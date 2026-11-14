@@ -3,7 +3,7 @@ Aeternum PremiApp Bot - Start & General Handlers
 """
 
 from aiogram import Bot, F, Router
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +16,16 @@ from bot.services.verification import (
 from config import settings
 from database import crud
 from bot.handlers.catalog import render_product_detail
-from bot.keyboards.user_kb import back_to_main_kb, main_menu_kb, referral_menu_kb
+from bot.keyboards.user_kb import (
+    NAV_HELP,
+    NAV_HOW_TO_BUY,
+    NAV_INTRO_TEXT,
+    NAV_REFERRAL,
+    back_to_main_kb,
+    main_menu_kb,
+    main_reply_kb,
+    referral_menu_kb,
+)
 
 router = Router(name="start_router")
 
@@ -134,6 +143,14 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot) -> None:
         parse_mode="HTML",
     )
 
+    # Keyboard navigasi persisten: satu pesan tidak bisa membawa inline +
+    # reply keyboard sekaligus, jadi keyboard dikirim sebagai pesan kedua.
+    await message.answer(
+        text=NAV_INTRO_TEXT,
+        reply_markup=main_reply_kb(is_admin=is_admin),
+        parse_mode="HTML",
+    )
+
 
 @router.callback_query(F.data == "back_to_main")
 async def cb_back_to_main(callback: CallbackQuery, session: AsyncSession) -> None:
@@ -156,11 +173,12 @@ async def cb_back_to_main(callback: CallbackQuery, session: AsyncSession) -> Non
     await callback.answer()
 
 
+@router.message(StateFilter(None), F.text == NAV_REFERRAL)
 @router.callback_query(F.data == "user_referral")
 async def cb_show_referral(
-    callback: CallbackQuery, session: AsyncSession, bot: Bot
+    event: Message | CallbackQuery, session: AsyncSession, bot: Bot
 ) -> None:
-    user = callback.from_user
+    user = event.from_user
     db_user = await crud.get_user_by_id(session=session, user_id=user.id)
     if not db_user:
         return
@@ -187,13 +205,19 @@ async def cb_show_referral(
         f"💰 <i>Saldo komisi tidak bisa ditarik tunai. Saldo dipakai otomatis sebagai <b>diskon 10%</b> di setiap pembelian produkmu.</i>"
     )
 
-    if callback.message:
-        await callback.message.edit_text(
+    if isinstance(event, CallbackQuery) and event.message:
+        await event.message.edit_text(
             text=text,
             reply_markup=referral_menu_kb(bot_username=bot_username, user_id=user.id),
             parse_mode="HTML",
         )
-    await callback.answer()
+        await event.answer()
+    elif isinstance(event, Message):
+        await event.answer(
+            text=text,
+            reply_markup=referral_menu_kb(bot_username=bot_username, user_id=user.id),
+            parse_mode="HTML",
+        )
 
 
 @router.callback_query(F.data == "user_withdraw_referral")
@@ -220,8 +244,9 @@ async def cb_withdraw_referral(callback: CallbackQuery, session: AsyncSession) -
     await callback.answer()
 
 
+@router.message(StateFilter(None), F.text == NAV_HOW_TO_BUY)
 @router.callback_query(F.data == "user_how_to_buy")
-async def cb_how_to_buy(callback: CallbackQuery) -> None:
+async def cb_how_to_buy(event: Message | CallbackQuery) -> None:
     text = (
         "💎 <b>PANDUAN LENGKAP CARA PEMBELIAN:</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -239,17 +264,24 @@ async def cb_how_to_buy(callback: CallbackQuery) -> None:
         "⚡ <i>Sistem otomatis 24 Jam didukung penuh oleh @dasrams.</i>"
     )
 
-    if callback.message:
-        await callback.message.edit_text(
+    if isinstance(event, CallbackQuery) and event.message:
+        await event.message.edit_text(
             text=text,
             reply_markup=back_to_main_kb(),
             parse_mode="HTML",
         )
-    await callback.answer()
+        await event.answer()
+    elif isinstance(event, Message):
+        await event.answer(
+            text=text,
+            reply_markup=back_to_main_kb(),
+            parse_mode="HTML",
+        )
 
 
+@router.message(StateFilter(None), F.text == NAV_HELP)
 @router.callback_query(F.data == "user_help")
-async def cb_help(callback: CallbackQuery) -> None:
+async def cb_help(event: Message | CallbackQuery) -> None:
     text = (
         "💬 <b>PUSAT BANTUAN & CUSTOMER SERVICE</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -263,9 +295,9 @@ async def cb_help(callback: CallbackQuery) -> None:
         "🤝 <i>Aeternum PremiApp Bot — Kepuasan dan Keamanan Transaksi Anda adalah Prioritas Kami.</i>"
     )
 
-    if callback.message:
-        if callback.message.text:
-            await callback.message.edit_text(
+    if isinstance(event, CallbackQuery) and event.message:
+        if event.message.text:
+            await event.message.edit_text(
                 text=text,
                 reply_markup=back_to_main_kb(),
                 parse_mode="HTML",
@@ -273,9 +305,15 @@ async def cb_help(callback: CallbackQuery) -> None:
         else:
             # Pesan media (mis. foto invoice QRIS) tidak punya teks:
             # edit_text gagal, kirim bantuan sebagai pesan baru.
-            await callback.message.answer(
+            await event.message.answer(
                 text=text,
                 reply_markup=back_to_main_kb(),
                 parse_mode="HTML",
             )
-    await callback.answer()
+        await event.answer()
+    elif isinstance(event, Message):
+        await event.answer(
+            text=text,
+            reply_markup=back_to_main_kb(),
+            parse_mode="HTML",
+        )

@@ -10,6 +10,7 @@ import logging
 from typing import Optional
 import qrcode
 from aiogram import Bot, F, Router
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import crud
 from bot.keyboards.user_kb import (
+    NAV_DEPOSIT,
     back_to_main_kb,
     insufficient_balance_kb,
     invoice_kb,
@@ -98,19 +100,26 @@ async def cb_show_wallet(callback: CallbackQuery, session: AsyncSession) -> None
     await callback.answer()
 
 
+@router.message(StateFilter(None), F.text == NAV_DEPOSIT)
 @router.callback_query(F.data == "wallet_topup")
-async def cb_prompt_topup(callback: CallbackQuery) -> None:
+async def cb_prompt_topup(event: Message | CallbackQuery) -> None:
     text = (
         "➕ <b>TOP UP SALDO VIA QRIS</b>\n\n"
         "Silakan pilih nominal saldo yang ingin Anda isi:"
     )
-    if callback.message:
-        await callback.message.edit_text(
+    if isinstance(event, CallbackQuery) and event.message:
+        await event.message.edit_text(
             text=text,
             reply_markup=topup_presets_kb(),
             parse_mode="HTML",
         )
-    await callback.answer()
+        await event.answer()
+    elif isinstance(event, Message):
+        await event.answer(
+            text=text,
+            reply_markup=topup_presets_kb(),
+            parse_mode="HTML",
+        )
 
 
 @router.callback_query(F.data.startswith("topup_nom_"))

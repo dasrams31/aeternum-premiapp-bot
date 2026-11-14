@@ -3,6 +3,7 @@ Aeternum PremiApp Bot - Catalog & Product Browsing Handlers
 """
 
 from aiogram import F, Router
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import crud
 from bot.keyboards.user_kb import (
+    NAV_CATALOG,
     back_to_main_kb,
     categories_kb,
     product_detail_kb,
@@ -23,8 +25,11 @@ class ApplyPromoState(StatesGroup):
     waiting_for_code = State()
 
 
+@router.message(StateFilter(None), F.text == NAV_CATALOG)
 @router.callback_query(F.data == "user_catalog")
-async def cb_show_categories(callback: CallbackQuery, session: AsyncSession) -> None:
+async def cb_show_categories(
+    event: Message | CallbackQuery, session: AsyncSession
+) -> None:
     categories = await crud.get_categories(session=session, only_active=True)
 
     if not categories:
@@ -32,13 +37,19 @@ async def cb_show_categories(callback: CallbackQuery, session: AsyncSession) -> 
             "🛍️ <b>KATALOG PRODUK</b>\n\n"
             "Saat ini belum ada kategori produk yang tersedia. Silakan cek kembali beberapa saat lagi!"
         )
-        if callback.message:
-            await callback.message.edit_text(
+        if isinstance(event, CallbackQuery) and event.message:
+            await event.message.edit_text(
                 text=text,
                 reply_markup=back_to_main_kb(),
                 parse_mode="HTML",
             )
-        await callback.answer()
+            await event.answer()
+        elif isinstance(event, Message):
+            await event.answer(
+                text=text,
+                reply_markup=back_to_main_kb(),
+                parse_mode="HTML",
+            )
         return
 
     text = (
@@ -46,13 +57,19 @@ async def cb_show_categories(callback: CallbackQuery, session: AsyncSession) -> 
         "Silakan pilih kategori produk di bawah ini untuk melihat daftar produk yang tersedia:"
     )
 
-    if callback.message:
-        await callback.message.edit_text(
+    if isinstance(event, CallbackQuery) and event.message:
+        await event.message.edit_text(
             text=text,
             reply_markup=categories_kb(categories),
             parse_mode="HTML",
         )
-    await callback.answer()
+        await event.answer()
+    elif isinstance(event, Message):
+        await event.answer(
+            text=text,
+            reply_markup=categories_kb(categories),
+            parse_mode="HTML",
+        )
 
 
 @router.callback_query(F.data.startswith("cat_"))

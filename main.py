@@ -31,6 +31,7 @@ from bot.handlers import (
     admin,
     catalog,
     history,
+    nav_keyboard,
     order,
     order_chat,
     payment_proof,
@@ -98,6 +99,7 @@ async def main() -> None:
     dp.include_router(verification_handlers.router)
     dp.include_router(broadcast_handlers.router)
     dp.include_router(start.router)
+    dp.include_router(nav_keyboard.router)
     dp.include_router(admin.router)
     dp.include_router(catalog.router)
     dp.include_router(wallet.router)
