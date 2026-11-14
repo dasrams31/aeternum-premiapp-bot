@@ -10,6 +10,11 @@ Subcommands (JSON in/out):
   mark-processed                     read [event_id, ...] on stdin
   counts --product-ids 1,2,3         available (unsold + unreserved) counts per product
   stock-out --product-id N          broadcast STOK HABIS to the Aeternum channel
+  price-change --product-id N --old-price X --new-price Y [--name S]
+                                     broadcast HARGA BERUBAH (channel + DM
+                                     semua user + DM admin), dipakai price-watch
+                                     watcher saat harga berubah
+  prices                             dump produk aktif (id, nama, harga) JSON
   restock --product-id N --added A --total T
                                      broadcast STOK DITAMBAH (channel + DM semua
                                      user + notifikasi subscriber), dipakai sync
@@ -334,6 +339,84 @@ async def cmd_restock(product_id: int, added: int, total: int):
         raise SystemExit(1)
 
 
+async def cmd_price_change(product_id, old_price, new_price, name=None, sources="", current="", drift=False):
+    """Broadcast HARGA BERUBAH ke channel Aeternum + DM semua user + DM admin.
+
+    Dipanggil price-watch watcher saat harga berubah di bot, store, atau
+    prices.json. product_id ATAU name wajib diisi: product_id bila produk
+    ada di bot (tombol Beli Sekarang ikut), name bila hanya ada di katalog
+    (tanpa tombol). Semua tipe produk boleh (TEXT_STATIC ikut).
+    Keluar 1 bila produk tidak ditemukan atau broadcast channel gagal.
+    """
+    from aiogram import Bot
+
+    from bot.services.broadcast import get_category_name
+    from bot.services.stock_updater import broadcast_price_change_event
+    from config import settings
+
+    if product_id is None and not name:
+        print(json.dumps({"error": "product-id or name required"}))
+        raise SystemExit(1)
+    async with async_session() as s:
+        product = None
+        cat_name = "Katalog Peka"
+        if product_id is not None:
+            product = await crud.get_product_by_id(session=s, product_id=product_id)
+            if not product:
+                print(json.dumps({"product_id": product_id, "error": "not found"}))
+                raise SystemExit(1)
+            name = product.name
+            cat_name = await get_category_name(s, product.category_id)
+        bot = Bot(token=settings.BOT_TOKEN)
+        try:
+            res = await broadcast_price_change_event(
+                bot, s, product, name, cat_name,
+                int(old_price), int(new_price),
+                sources=sources, current_prices=current, drift=drift,
+            )
+        finally:
+            await bot.session.close()
+    print(
+        json.dumps(
+            {
+                "product_id": product_id,
+                "name": name,
+                "old_price": int(old_price),
+                "new_price": int(new_price),
+                "channel": res.get("channel"),
+                "dm_sent": res.get("dm_sent"),
+                "dm_failed": res.get("dm_failed"),
+                "admin_dm": res.get("admin_dm"),
+            },
+            ensure_ascii=False,
+        )
+    )
+    if not res.get("channel"):
+        raise SystemExit(1)
+
+
+async def cmd_prices():
+    """Dump semua produk aktif (id, nama, harga rupiah, tipe) sebagai JSON.
+
+    Read-only; dipakai price-watch watcher untuk membandingkan harga bot
+    dengan snapshot. Tidak mengirim apa pun.
+    """
+    async with async_session() as s:
+        res = await s.execute(
+            select(Product).where(Product.is_active.is_(True))
+        )
+        out = [
+            {
+                "id": p.id,
+                "name": p.name,
+                "price": int(p.price),
+                "type": p.product_type,
+            }
+            for p in res.scalars().all()
+        ]
+    print(json.dumps(out, ensure_ascii=False))
+
+
 async def cmd_store_sale(payload):
     """Broadcast a store sale to the Aeternum channel, same format as a
     bot purchase (broadcast_transaction_success). Reads
@@ -426,6 +509,15 @@ def main():
     rs.add_argument("--product-id", required=True, type=int)
     rs.add_argument("--added", required=True, type=int)
     rs.add_argument("--total", required=True, type=int)
+    pc = sub.add_parser("price-change")
+    pc.add_argument("--product-id", type=int, default=None)
+    pc.add_argument("--name", default=None)
+    pc.add_argument("--old-price", required=True, type=int)
+    pc.add_argument("--new-price", required=True, type=int)
+    pc.add_argument("--sources", default="")
+    pc.add_argument("--current", default="")
+    pc.add_argument("--drift", action="store_true")
+    sub.add_parser("prices")
     sub.add_parser("store-sale")
     sub.add_parser("recent-sales")
     args = ap.parse_args()
@@ -449,6 +541,10 @@ def main():
         asyncio.run(cmd_stock_out(args.product_id))
     elif args.cmd == "restock":
         asyncio.run(cmd_restock(args.product_id, args.added, args.total))
+    elif args.cmd == "price-change":
+        asyncio.run(cmd_price_change(args.product_id, args.old_price, args.new_price, name=args.name, sources=args.sources, current=args.current, drift=args.drift))
+    elif args.cmd == "prices":
+        asyncio.run(cmd_prices())
     elif args.cmd == "store-sale":
         payload = json.load(sys.stdin)
         asyncio.run(cmd_store_sale(payload))

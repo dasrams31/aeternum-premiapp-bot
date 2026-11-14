@@ -21,6 +21,9 @@ di hari yang sama.
 BROADCAST EVENT (perintah user 7 Nov 2026):
 - Restock & produk baru adalah SATU event = SATU broadcast: channel
   Aeternum + DM semua pengguna + (restock) notifikasi subscriber.
+- Perubahan harga juga SATU event = SATU broadcast: channel Aeternum +
+  DM semua pengguna + DM admin (detail sumber + harga per sumber),
+  dipicu price-watch watcher tiap 5 menit (perintah user 15 Nov 2026).
 - Trigger-nya aksi NYATA admin (tambah stok / buat produk), BUKAN sync
   berkala worker ini — supaya tidak spam tiap sync. Worker harian hanya
   jadi pengaman: notifikasi subscriber bila flag berubah OUT->ready, dan
@@ -44,6 +47,7 @@ from aiogram import Bot
 from sqlalchemy import select
 
 from bot.services.broadcast import (
+    broadcast_price_changed,
     broadcast_product_added,
     broadcast_ready_digest_to_aeternum,
     broadcast_ready_digest_to_channel,
@@ -51,6 +55,8 @@ from bot.services.broadcast import (
     broadcast_stock_out,
     broadcast_to_all_users,
     build_new_product_broadcast_text,
+    build_price_change_admin_text,
+    build_price_change_broadcast_text,
     build_restock_broadcast_text,
     detect_new_products,
     digest_dm_kb,
@@ -144,6 +150,61 @@ async def broadcast_restock_event(
         "dm_failed": dm_failed,
         "subscribers_notified": notified,
         "excluded_subscribers": len(sub_ids),
+    }
+
+
+async def broadcast_price_change_event(
+    bot: Bot,
+    session,
+    product: Optional[Product],
+    name: str,
+    cat_name: str,
+    old_price,
+    new_price,
+    sources: str = "",
+    current_prices: str = "",
+    drift: bool = False,
+) -> dict:
+    """SATU event perubahan harga = SATU broadcast: channel Aeternum + DM
+    semua user + DM admin (detail sumber + harga per sumber).
+
+    Dipanggil price-watch watcher saat harga berubah di bot, store, atau
+    prices.json. `product` boleh None (harga katalog tanpa pasangan bot):
+    teks tetap terkirim, hanya tanpa tombol Beli Sekarang. Semua tipe produk
+    boleh (TEXT_STATIC ikut). Kembalikan ringkasan hitungan pengiriman.
+    """
+    from config import settings
+
+    channel_ok = await broadcast_price_changed(
+        bot, session, product, name, cat_name, old_price, new_price
+    )
+    text = build_price_change_broadcast_text(name, cat_name, old_price, new_price)
+    kb = product_buy_kb(product.id) if product is not None else None
+    dm_sent, dm_failed = await broadcast_to_all_users(
+        bot, session, text, reply_markup=kb
+    )
+    admin_text = build_price_change_admin_text(
+        name, old_price, new_price, sources, current_prices, drift
+    )
+    admin_ok = False
+    try:
+        await bot.send_message(
+            chat_id=settings.ADMIN_ID, text=admin_text, parse_mode="HTML"
+        )
+        admin_ok = True
+    except Exception as e:
+        logger.warning(f"Gagal kirim notif harga ke admin ({name}): {e}")
+    logger.info(
+        "Broadcast perubahan harga %s: %s -> %s (sumber %s): channel=%s, "
+        "DM=%s (gagal %s), admin=%s.",
+        name, old_price, new_price, sources,
+        channel_ok, dm_sent, dm_failed, admin_ok,
+    )
+    return {
+        "channel": channel_ok,
+        "dm_sent": dm_sent,
+        "dm_failed": dm_failed,
+        "admin_dm": admin_ok,
     }
 
 

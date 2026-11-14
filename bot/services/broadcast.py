@@ -325,6 +325,58 @@ def build_new_product_broadcast_text(
     return "\n".join(lines)
 
 
+def build_price_change_broadcast_text(
+    name: str, cat_name: str, old_price, new_price
+) -> str:
+    """Teks broadcast perubahan harga (satu sumber: channel + DM)."""
+    name = html.escape(name)
+    cat = html.escape(cat_name)
+    if float(new_price) < float(old_price):
+        header = "📉 <b>HARGA TURUN!</b>"
+        closer = "Mumpung turun, langsung checkout sebelum berubah lagi! 👇"
+    elif float(new_price) > float(old_price):
+        header = "📈 <b>HARGA NAIK</b>"
+        closer = "Harga baru berlaku mulai sekarang. 👇"
+    else:
+        header = "💲 <b>HARGA BERUBAH</b>"
+        closer = "Cek harga terbaru di bawah! 👇"
+    lines = [
+        header,
+        "",
+        f"📦 <b>{name}</b>",
+        f"🏷️ Kategori: {cat}",
+        f"💲 Harga lama: {_rupiah(old_price)}",
+        f"💲 Harga baru: <b>{_rupiah(new_price)}</b>",
+        "",
+        closer,
+    ]
+    return "\n".join(lines)
+
+
+def build_price_change_admin_text(
+    name: str, old_price, new_price, sources: str, current_prices: str, drift: bool
+) -> str:
+    """Teks DM admin untuk perubahan harga: sumber + harga per sumber."""
+    if float(new_price) < float(old_price):
+        direction = "📉 Turun"
+    elif float(new_price) > float(old_price):
+        direction = "📈 Naik"
+    else:
+        direction = "💲 Berubah"
+    lines = [
+        "🔔 <b>NOTIF HARGA (ADMIN)</b>",
+        "",
+        f"📦 <b>{html.escape(name)}</b>",
+        f"{direction}: {_rupiah(old_price)} → <b>{_rupiah(new_price)}</b>",
+        f"📍 Sumber berubah: {html.escape(sources) if sources else '-'}",
+    ]
+    if current_prices:
+        lines.append(f"💰 Harga saat ini: {html.escape(current_prices)}")
+    if drift:
+        lines.append("⚠️ Harga antar sumber belum sama, cek konsistensi.")
+    return "\n".join(lines)
+
+
 def build_stock_out_text(product: Product, cat_name: str) -> str:
     """Teks broadcast stok habis (channel Aeternum)."""
     name = html.escape(product.name)
@@ -457,6 +509,22 @@ async def broadcast_stock_out(bot: Bot, session, product: Product) -> bool:
     cat_name = await get_category_name(session, product.category_id)
     text = build_stock_out_text(product, cat_name)
     return await send_to_aeternum(bot, text, reply_markup=remind_kb(product.id))
+
+
+async def broadcast_price_changed(
+    bot: Bot,
+    session,
+    product,
+    name: str,
+    cat_name: str,
+    old_price,
+    new_price,
+) -> bool:
+    """Harga berubah -> channel Aeternum (format baru + tombol Beli Sekarang
+    bila produknya ada di bot). Bagian channel dari broadcast_price_change_event."""
+    text = build_price_change_broadcast_text(name, cat_name, old_price, new_price)
+    kb = product_buy_kb(product.id) if product is not None else None
+    return await send_to_aeternum(bot, text, reply_markup=kb)
 
 
 async def broadcast_stock_added(
