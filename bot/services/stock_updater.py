@@ -227,9 +227,9 @@ def build_ready_digest_chunks(ready: List[Tuple[Product, Optional[int], str]]) -
             current_cat = cat_name
             lines.append(f"\n<b>{cat_name}</b>")
         if count is not None:
-            lines.append(f"• {product.name} ({count} item)")
+            lines.append(f"• {product.name} — {_rupiah(product.price)} ({count} item)")
         else:
-            lines.append(f"• {product.name}")
+            lines.append(f"• {product.name} — {_rupiah(product.price)}")
     lines.append(footer)
     chunks: List[str] = []
     current = ""
