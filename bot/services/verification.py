@@ -17,6 +17,11 @@ Alur:
   terverifikasi secara berkala: yang sudah gabung ditandai terverifikasi +
   dikirimi chat "verifikasi berhasil, silakan /start"; yang belum gabung
   dikirimi pengingat (maks 1x per 6 jam per user).
+- Checker juga mengecek ulang user yang SUDAH terverifikasi (maks 1x per
+  6 jam per user): bila ketahuan keluar dari salah satu chat, verifikasi
+  DICABUT dan user dikirimi DM berisi chat yang harus digabung lagi.
+  Middleware lalu meminta gabung lagi saat user memakai bot; tombol
+  "Saya Sudah Gabung - Cek Sekarang" memverifikasi ulang secara live.
 
 Admin (ADMIN_ID) selalu lolos tanpa verifikasi.
 """
@@ -207,6 +212,16 @@ async def mark_verified(session, user_id: int) -> None:
         logger.info(f"User {user_id} terverifikasi gabung 3 chat (Peka + Aeternum).")
 
 
+async def mark_unverified(session, user_id: int) -> None:
+    """Cabut verifikasi user (dipakai saat ketahuan keluar dari salah satu chat)."""
+    user = await crud.get_user_by_id(session=session, user_id=user_id)
+    if user and user.is_verified:
+        user.is_verified = False
+        user.verified_at = None
+        await session.commit()
+        logger.info(f"User {user_id} dicabut verifikasinya (keluar dari salah satu chat).")
+
+
 def verification_keyboard() -> InlineKeyboardMarkup:
     """Tombol gabung channel/grup + tombol cek."""
     builder = InlineKeyboardBuilder()
@@ -324,6 +339,47 @@ async def _check_one_user(bot: Bot, user_id: int) -> None:
                 logger.warning(f"Gagal kirim chat verifikasi gagal ke {user_id}: {e}")
 
 
+async def _recheck_verified_user(bot: Bot, user_id: int) -> None:
+    """Satu putaran cek ulang untuk user yang SUDAH terverifikasi.
+
+    Bila user keluar dari salah satu dari 3 chat, verifikasi dicabut dan
+    user dikirimi DM berisi chat yang harus digabung lagi + tombol gabung.
+    Bila masih gabung ketiganya, tidak ada yang berubah.
+    """
+    async with async_session() as session:
+        user = await crud.get_user_by_id(session=session, user_id=user_id)
+        if not user or not user.is_verified or user_id == settings.ADMIN_ID:
+            return
+        in_channel, in_group, in_aeternum = await check_membership(bot, user_id)
+        user.verify_last_check_at = datetime.now(timezone.utc)
+        await session.commit()
+        if in_channel and in_group and in_aeternum:
+            return
+        missing = []
+        if not in_channel:
+            missing.append(f"Channel Peka ({settings.PEKA_CHANNEL_USERNAME})")
+        if not in_group:
+            missing.append(f"Grup Peka ({settings.PEKA_GROUP_USERNAME})")
+        if not in_aeternum:
+            missing.append(f"Channel Aeternum ({settings.AETERNUM_CHANNEL_USERNAME})")
+        await mark_unverified(session, user_id)
+        try:
+            await bot.send_message(
+                chat_id=user_id,
+                text=(
+                    "\u26a0\ufe0f <b>VERIFIKASI DICABUT \u2014 KAMU KELUAR DARI CHAT</b>\n"
+                    "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+                    "Kami mendeteksi kamu keluar dari: <b>" + ", ".join(missing) + "</b>.\n\n"
+                    "Supaya bisa memakai bot lagi, gabung kembali lewat tombol di bawah, "
+                    "lalu tekan <b>\u2705 Saya Sudah Gabung \u2014 Cek Sekarang</b>."
+                ),
+                reply_markup=verification_keyboard(),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning(f"Gagal kirim chat verifikasi dicabut ke {user_id}: {e}")
+
+
 async def start_verification_checker(bot: Bot, interval_seconds: int | None = None) -> None:
     """Cron verifikasi: cek ulang user yang belum terverifikasi secara berkala.
 
@@ -355,6 +411,20 @@ async def start_verification_checker(bot: Bot, interval_seconds: int | None = No
                     },
                 )
                 user_ids = [r[0] for r in rows.all()]
+                verified_rows = await session.execute(
+                    text(
+                        "SELECT id FROM users WHERE id != :admin "
+                        "AND COALESCE(is_verified, FALSE) = TRUE "
+                        "AND (verify_last_check_at IS NULL "
+                        "OR verify_last_check_at < :six_hours_ago) "
+                        "ORDER BY verify_last_check_at ASC NULLS FIRST LIMIT 20"
+                    ),
+                    {
+                        "admin": settings.ADMIN_ID,
+                        "six_hours_ago": now - timedelta(hours=6),
+                    },
+                )
+                verified_ids = [r[0] for r in verified_rows.all()]
             for uid in user_ids:
                 try:
                     await _check_one_user(bot, uid)
@@ -362,6 +432,14 @@ async def start_verification_checker(bot: Bot, interval_seconds: int | None = No
                     raise
                 except Exception:
                     logger.exception(f"Verification check gagal untuk user {uid}.")
+                await asyncio.sleep(0.5)
+            for uid in verified_ids:
+                try:
+                    await _recheck_verified_user(bot, uid)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception(f"Verification re-check gagal untuk user {uid}.")
                 await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             raise
