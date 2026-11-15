@@ -455,6 +455,18 @@ async def send_to_group(bot: Bot, text: str, **kwargs) -> bool:
         return False
 
 
+async def send_to_admin_dm(bot: Bot, text: str, **kwargs) -> bool:
+    """Kirim satu pesan ke DM admin. Kembalikan True bila terkirim."""
+    try:
+        await bot.send_message(
+            chat_id=settings.ADMIN_ID, text=text, parse_mode="HTML", **kwargs
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"Gagal kirim DM admin: {e}")
+        return False
+
+
 async def broadcast_to_all_users(
     bot: Bot,
     session,
@@ -518,7 +530,8 @@ async def broadcast_ready_digest_to_aeternum(bot: Bot, chunks: List[str]) -> int
 async def broadcast_transaction_success(
     bot: Bot, product_name: str, amount: float, buyer_first_name: Optional[str]
 ) -> bool:
-    """Transaksi berhasil -> channel Aeternum. Tanpa data sensitif (tanpa WA, ID, atau isi akun)."""
+    """Transaksi berhasil -> channel Aeternum + grup Peka + DM admin.
+    Tanpa data sensitif (tanpa WA, ID, atau isi akun)."""
     buyer_line = (
         f"👤 <b>Pembeli:</b> <b>{buyer_first_name}</b>\n" if buyer_first_name else ""
     )
@@ -529,15 +542,22 @@ async def broadcast_transaction_success(
         f"{buyer_line}\n"
         f"Beli juga di @aeternum_premibot — bayar QRIS, langsung dikirim."
     )
-    return await send_to_aeternum(bot, text)
+    ok = await send_to_aeternum(bot, text)
+    await send_to_group(bot, text)
+    await send_to_admin_dm(bot, text)
+    return ok
 
 
 async def broadcast_stock_out(bot: Bot, session, product: Product) -> bool:
-    """Produk TEXT_STOCK kehabisan stok -> channel Aeternum, dengan tombol
-    pengingat restock (deep-link /start remind_<id>)."""
+    """Produk TEXT_STOCK kehabisan stok -> channel Aeternum + grup Peka +
+    DM admin, dengan tombol pengingat restock (deep-link /start remind_<id>)."""
     cat_name = await get_category_name(session, product.category_id)
     text = build_stock_out_text(product, cat_name)
-    return await send_to_aeternum(bot, text, reply_markup=remind_kb(product.id))
+    kb = remind_kb(product.id)
+    ok = await send_to_aeternum(bot, text, reply_markup=kb)
+    await send_to_group(bot, text, reply_markup=kb)
+    await send_to_admin_dm(bot, text, reply_markup=kb)
+    return ok
 
 
 async def broadcast_price_changed(
@@ -549,11 +569,14 @@ async def broadcast_price_changed(
     old_price,
     new_price,
 ) -> bool:
-    """Harga berubah -> channel Aeternum (format baru + tombol Beli Sekarang
-    bila produknya ada di bot). Bagian channel dari broadcast_price_change_event."""
+    """Harga berubah -> channel Aeternum + grup Peka (format baru + tombol
+    Beli Sekarang bila produknya ada di bot). Bagian channel dari
+    broadcast_price_change_event."""
     text = build_price_change_broadcast_text(name, cat_name, old_price, new_price)
     kb = product_buy_kb(product.id) if product is not None else None
-    return await send_to_aeternum(bot, text, reply_markup=kb)
+    ok = await send_to_aeternum(bot, text, reply_markup=kb)
+    await send_to_group(bot, text, reply_markup=kb)
+    return ok
 
 
 async def broadcast_stock_added(
@@ -564,20 +587,25 @@ async def broadcast_stock_added(
     total: int,
     test_label: str = "",
 ) -> bool:
-    """Admin menambah stok akun -> channel Aeternum (format restock baru +
-    tombol Beli Sekarang). Bagian channel dari broadcast_restock_event."""
+    """Admin menambah stok akun -> channel Aeternum + grup Peka (format
+    restock baru + tombol Beli Sekarang). Bagian channel dari
+    broadcast_restock_event."""
     cat_name = await get_category_name(session, product.category_id)
     text = build_restock_broadcast_text(product, cat_name, added, total)
     if test_label:
         text = f"{test_label}\n{text}"
-    return await send_to_aeternum(bot, text, reply_markup=product_buy_kb(product.id))
+    kb = product_buy_kb(product.id)
+    ok = await send_to_aeternum(bot, text, reply_markup=kb)
+    await send_to_group(bot, text, reply_markup=kb)
+    return ok
 
 
 async def broadcast_product_added(
     bot: Bot, session, product: Product, test_label: str = ""
 ) -> bool:
-    """Produk baru masuk katalog -> channel Aeternum (format baru + tombol
-    Beli Sekarang). Bagian channel dari broadcast_new_product_event."""
+    """Produk baru masuk katalog -> channel Aeternum + grup Peka (format
+    baru + tombol Beli Sekarang). Bagian channel dari
+    broadcast_new_product_event."""
     from database import crud
 
     cat_name = await get_category_name(session, product.category_id)
@@ -587,7 +615,10 @@ async def broadcast_product_added(
     text = build_new_product_broadcast_text(product, cat_name, count)
     if test_label:
         text = f"{test_label}\n{text}"
-    return await send_to_aeternum(bot, text, reply_markup=product_buy_kb(product.id))
+    kb = product_buy_kb(product.id)
+    ok = await send_to_aeternum(bot, text, reply_markup=kb)
+    await send_to_group(bot, text, reply_markup=kb)
+    return ok
 
 
 async def broadcast_user_joined(bot: Bot, chat_id: int, first_name: str) -> bool:

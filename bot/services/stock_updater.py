@@ -112,8 +112,8 @@ async def broadcast_restock_event(
     total: int,
     test_label: str = "",
 ) -> dict:
-    """SATU event restock = SATU broadcast: channel Aeternum + DM semua user
-    (kecuali subscriber produk itu) + notifikasi subscriber.
+    """SATU event restock = SATU broadcast: channel Aeternum + grup Peka +
+    DM semua user (kecuali subscriber produk itu) + notifikasi subscriber.
 
     Dipanggil dari alur admin tambah stok dan dari sync worker saat sebuah
     event restock diterapkan (tambah stok via store). `test_label` (mis.
@@ -165,8 +165,8 @@ async def broadcast_price_change_event(
     current_prices: str = "",
     drift: bool = False,
 ) -> dict:
-    """SATU event perubahan harga = SATU broadcast: channel Aeternum + DM
-    semua user + DM admin (detail sumber + harga per sumber).
+    """SATU event perubahan harga = SATU broadcast: channel Aeternum +
+    grup Peka + DM semua user + DM admin (detail sumber + harga per sumber).
 
     Dipanggil price-watch watcher saat harga berubah di bot, store, atau
     prices.json. `product` boleh None (harga katalog tanpa pasangan bot):
@@ -211,7 +211,7 @@ async def broadcast_price_change_event(
 async def broadcast_new_product_event(
     bot: Bot, session, product: Product, test_label: str = ""
 ) -> dict:
-    """SATU event produk baru = SATU broadcast: channel Aeternum + DM semua user."""
+    """SATU event produk baru = SATU broadcast: channel Aeternum + grup Peka + DM semua user."""
     channel_ok = await broadcast_product_added(bot, session, product, test_label=test_label)
     cat_name = await get_category_name(session, product.category_id)
     count = None
@@ -373,7 +373,7 @@ async def run_daily_stock_update(bot: Bot):
                 notified_total += await notify_restock_subscribers(bot, session, product, count)
             elif not old_flag and new_flag:
                 # Broadcast rutin: produk kehabisan stok -> channel Aeternum
-                # (dengan tombol pengingat restock).
+                # + grup Peka + DM admin (dengan tombol pengingat restock).
                 await broadcast_stock_out(bot, session, product)
         # Pengaman: produk baru yang lolos dari alur admin (mis. dibuat lewat
         # script) tetap di-broadcast sekali di sini. Produk dari alur admin

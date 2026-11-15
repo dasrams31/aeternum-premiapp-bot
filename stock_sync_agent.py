@@ -248,6 +248,32 @@ async def cmd_notify_batch(messages):
     print(json.dumps(results))
 
 
+async def cmd_group_notify(messages):
+    """Send stock alerts to the Peka group (@peka_aigroup). Best-effort
+    mirror of the admin-DM notify-batch: only stock kinds are forwarded
+    here, never buyer chats or order details."""
+    from aiogram import Bot
+
+    from config import settings
+
+    bot = Bot(token=settings.BOT_TOKEN)
+    results = []
+    try:
+        for m in messages:
+            try:
+                sent = await bot.send_message(
+                    settings.PEKA_GROUP_ID, m["text"], parse_mode="HTML"
+                )
+                results.append(
+                    {"key": m["key"], "ok": True, "message_id": sent.message_id}
+                )
+            except Exception as e:  # noqa: BLE001 - report per message, do not crash the batch
+                results.append({"key": m["key"], "ok": False, "error": str(e)})
+    finally:
+        await bot.session.close()
+    print(json.dumps(results))
+
+
 async def cmd_stock_out(product_id: int):
     """Broadcast STOK HABIS realtime ke channel Aeternum.
 
@@ -503,6 +529,7 @@ def main():
     c = sub.add_parser("counts")
     c.add_argument("--product-ids", required=True)
     sub.add_parser("notify-batch")
+    sub.add_parser("group-notify")
     so = sub.add_parser("stock-out")
     so.add_argument("--product-id", required=True, type=int)
     rs = sub.add_parser("restock")
@@ -534,6 +561,9 @@ def main():
     elif args.cmd == "notify-batch":
         messages = json.load(sys.stdin)
         asyncio.run(cmd_notify_batch(messages))
+    elif args.cmd == "group-notify":
+        messages = json.load(sys.stdin)
+        asyncio.run(cmd_group_notify(messages))
     elif args.cmd == "counts":
         ids = [int(x) for x in args.product_ids.split(",") if x.strip()]
         asyncio.run(cmd_counts(ids))
