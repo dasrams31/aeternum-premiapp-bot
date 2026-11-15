@@ -59,6 +59,36 @@ def _rupiah(price) -> str:
     return f"Rp {float(price):,.0f}".replace(",", ".")
 
 
+def admin_chat_kb(
+    invoice_id: str, buyer_username: Optional[str]
+) -> InlineKeyboardMarkup:
+    """Tombol chat admin -> pembeli untuk semua DM admin soal satu invoice.
+
+    Baris pertama SELALU ada: "Balas via Chat Bot" membuka thread order-chat
+    (callback chat_seller_<invoice>), yang jalan tanpa peduli pembeli punya
+    username atau tidak. Bila pembeli punya username, tambah baris kedua
+    berupa link langsung ke DM Telegram-nya.
+    """
+    rows: list = [
+        [
+            InlineKeyboardButton(
+                text="💬 Balas via Chat Bot",
+                callback_data=f"chat_seller_{invoice_id}",
+            )
+        ]
+    ]
+    if buyer_username:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="📱 Chat Pembeli (Telegram)",
+                    url=f"https://t.me/{buyer_username}",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def checkout_decision_kb(
     invoice_id: str, buyer_username: Optional[str]
 ) -> InlineKeyboardMarkup:
@@ -69,11 +99,10 @@ def checkout_decision_kb(
     invoice REJECTED tanpa info apa pun ke pembeli. Abaikan hanya
     menutup kartu dan membiarkan invoice apa adanya.
     """
-    rows: list = []
-    if buyer_username:
-        rows.append(
-            [InlineKeyboardButton(text="💬 Chat Pembeli", url=f"https://t.me/{buyer_username}")]
-        )
+    # Baris chat SELALU ada (pola yang sama dengan handler konfirmasi/laporan
+    # di order.py, commit b56c41e): thread order-chat jalan untuk admin
+    # tanpa peduli pembeli punya username atau tidak.
+    rows: list = list(admin_chat_kb(invoice_id, buyer_username).inline_keyboard)
     rows.append(
         [
             InlineKeyboardButton(text="✅ Terima", callback_data=f"co_acc_{invoice_id}"),

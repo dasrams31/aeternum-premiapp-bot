@@ -38,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from database import crud
 from database.models import Product, Transaction
-from bot.services.broadcast import broadcast_transaction_success
+from bot.services.broadcast import admin_chat_kb, broadcast_transaction_success
 from bot.services.fulfillment import deliver_purchased_product
 
 logger = logging.getLogger(__name__)
@@ -135,9 +135,13 @@ async def process_checkout_decision(
             )
         except Exception:
             logger.exception("Gagal kirim pesan top-up manual #%s", trx.id)
+        buyer = await crud.get_user_by_id(session=session, user_id=trx.user_id)
         try:
             await bot.send_message(
                 chat_id=settings.ADMIN_ID,
+                reply_markup=admin_chat_kb(
+                    trx.id, buyer.username if buyer else None
+                ),
                 text=(
                     f"💰 <b>NOTIFIKASI TOP UP SALDO MANUAL!</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -169,9 +173,13 @@ async def process_checkout_decision(
             amount=float(trx.amount),
             buyer_first_name=buyer.first_name if buyer else None,
         )
+    buyer = await crud.get_user_by_id(session=session, user_id=trx.user_id)
     try:
         await bot.send_message(
             chat_id=settings.ADMIN_ID,
+            reply_markup=admin_chat_kb(
+                trx.id, buyer.username if buyer else None
+            ),
             text=(
                 f"💰 <b>NOTIFIKASI PEMBELIAN MANUAL!</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
