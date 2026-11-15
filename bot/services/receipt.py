@@ -1,13 +1,16 @@
-"""Struk pembelian (receipt) Aeternum: teks + gambar kartu struk.
+"""Struk pembelian (receipt) Aeternum: teks + gambar struk.
 
 Format meniru struk toko referensi (perintah user 16 Nov 2026):
 teks "STRUK PEMBELIAN" dengan detail pembelian + ID invoice Aeternum,
-plus gambar kartu struk berisi info yang sama. Dipakai
+plus gambar struk berisi info yang sama. Dipakai
 broadcast_transaction_success ke channel Aeternum, grup Peka, dan DM admin.
 
-Gambar dibuat dengan PIL (font DejaVu, tersedia di server). Bila render
-gagal, broadcast tetap jalan dengan teks saja — alur pembayaran tidak
-pernah rusak gara-gara struk.
+Gambar: struk kertas ala Peka — kertas putih bergerigi (sobekan) di atas
+krem #F5F1E8, pelat nama kuning Peka #FFD60A "AETERNUM WEBSPACE &
+PremiApp Bot", isi monospace (DejaVu Sans Mono), garis putus-putus,
+barcode invoice, ucapan terima kasih. Bila render gagal, broadcast
+tetap jalan dengan teks saja — alur pembayaran tidak pernah rusak
+gara-gara struk.
 """
 
 import io
@@ -21,6 +24,8 @@ WIB = timezone(timedelta(hours=7))
 
 FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+FONT_MONO = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
+FONT_MONO_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
 
 
 def format_method(payment_method: Optional[str]) -> str:
@@ -102,6 +107,53 @@ def _wrap_text(draw, text: str, font, max_width: int):
     return lines or ["-"]
 
 
+def _text_h(draw, text: str, font) -> int:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[3] - bbox[1]
+
+
+def _dashed_line(draw, x0: int, x1: int, y: int, color, width: int = 3):
+    x = x0
+    while x < x1:
+        seg = min(16, x1 - x)
+        draw.line([(x, y), (x + seg, y)], fill=color, width=width)
+        x += 16 + 12
+
+
+def _zigzag_points(x0: int, x1: int, y_top: int, y_bottom: int, tooth: int = 30, depth: int = 18):
+    """Titik poligon kertas: gerigi di tepi atas dan bawah."""
+    pts = []
+    x = x0
+    up = True
+    while x < x1:
+        pts.append((x, y_top - depth if up else y_top))
+        x += tooth
+        up = not up
+    pts.append((x1, y_top))
+    pts.append((x1, y_bottom))
+    x = x1
+    down = True
+    while x > x0:
+        pts.append((x, y_bottom + depth if down else y_bottom))
+        x -= tooth
+        down = not down
+    pts.append((x0, y_bottom))
+    return pts
+
+
+def _barcode(draw, x0: int, y0: int, width: int, height: int, code: str):
+    """Barcode dekoratif deterministik dari string invoice."""
+    x = x0
+    i = 0
+    while x < x0 + width - 8:
+        ch = code[i % len(code)]
+        bar_w = 2 + (ord(ch) % 4) * 2
+        gap_w = 2 + (ord(ch) % 3) * 2
+        draw.rectangle([x, y0, x + bar_w, y0 + height], fill=(13, 17, 23))
+        x += bar_w + gap_w
+        i += 1
+
+
 def render_receipt_image(
     product_name: str,
     amount: float,
@@ -111,41 +163,38 @@ def render_receipt_image(
     payment_method: Optional[str] = None,
     paid_at: Optional[datetime] = None,
 ) -> bytes:
-    """Gambar kartu struk (JPEG) meniru kartu struk referensi.
+    """Gambar struk kertas ala Peka (JPEG).
 
-    Tema kuning + krem Peka (perintah user 16 Nov 2026): header kuning
-    Peka #FFD60A "AETERNUM / STRUK PEMBELIAN" + tanggal, kartu putih di
-    atas krem #F5F1E8, pill hijau "PEMBAYARAN BERHASIL", baris Order ID /
-    Produk / Jumlah / Pembeli / Metode / Waktu, garis tebal, TOTAL, lalu
-    ucapan terima kasih.
+    Kertas putih bergerigi di atas krem, pelat nama kuning Peka
+    "AETERNUM WEBSPACE & PremiApp Bot", isi monospace dengan garis
+    putus-putus, TOTAL tebal, barcode invoice, ucapan terima kasih.
     """
     from PIL import Image, ImageDraw
 
     width = 1080
-    margin = 28
-    card_x0, card_x1 = margin, width - margin
-    pad = 56
+    paper_x0, paper_x1 = 90, 990
+    pad = 64
 
+    cream = (245, 241, 232)  # Peka cream #F5F1E8
+    paper = (255, 255, 255)
     yellow = (255, 214, 10)  # Peka yellow #FFD60A
-    bg = (245, 241, 232)  # Peka cream #F5F1E8
-    white = (255, 255, 255)
     ink = (13, 17, 23)
-    grey = (90, 86, 72)  # cream dim #5A5648
-    light_grey = (90, 86, 72)
-    hairline = (232, 226, 210)
-    green_bg = (220, 252, 231)
-    green_text = (21, 128, 61)
+    dim = (90, 86, 72)  # cream dim #5A5648
+    dash = (180, 172, 150)
+    green = (21, 128, 61)
 
-    f_store = _load_font(FONT_BOLD, 58)
-    f_sub = _load_font(FONT_REGULAR, 28)
-    f_date = _load_font(FONT_REGULAR, 28)
-    f_pill = _load_font(FONT_BOLD, 30)
-    f_label = _load_font(FONT_REGULAR, 32)
-    f_value = _load_font(FONT_BOLD, 34)
-    f_total_label = _load_font(FONT_BOLD, 40)
-    f_total_value = _load_font(FONT_BOLD, 58)
-    f_foot = _load_font(FONT_REGULAR, 28)
-    f_foot_small = _load_font(FONT_REGULAR, 26)
+    f_name = _load_font(FONT_BOLD, 52)
+    f_name2 = _load_font(FONT_BOLD, 36)
+    f_title = _load_font(FONT_MONO_BOLD, 32)
+    f_date = _load_font(FONT_MONO, 28)
+    f_ok = _load_font(FONT_MONO_BOLD, 34)
+    f_label = _load_font(FONT_MONO, 30)
+    f_value = _load_font(FONT_MONO_BOLD, 30)
+    f_total_label = _load_font(FONT_MONO_BOLD, 40)
+    f_total_value = _load_font(FONT_MONO_BOLD, 46)
+    f_foot = _load_font(FONT_MONO, 26)
+    f_foot_bold = _load_font(FONT_MONO_BOLD, 28)
+    f_barcode_num = _load_font(FONT_MONO, 28)
 
     date_str = format_receipt_time(paid_at)
     invoice = invoice_id or "Manual"
@@ -154,11 +203,10 @@ def render_receipt_image(
     qty = f"1x @ {_rupiah(amount)}"
     total = _rupiah(amount)
 
-    # Ukur dulu (produk bisa membungkus 2 baris) supaya tinggi pas.
     probe = Image.new("RGB", (10, 10))
-    probe_draw = ImageDraw.Draw(probe)
-    value_w = 640
-    product_lines = _wrap_text(probe_draw, product_name, f_value, value_w)
+    pdraw = ImageDraw.Draw(probe)
+    value_w = 620
+    product_lines = _wrap_text(pdraw, product_name, f_value, value_w)
     rows = [
         ("Order ID", [invoice]),
         ("Produk", product_lines),
@@ -167,94 +215,140 @@ def render_receipt_image(
         ("Metode", [method]),
         ("Waktu", [date_str]),
     ]
-    line_h = 46
-    row_gap = 26
-    rows_h = 0
-    for _label, lines in rows:
-        rows_h += len(lines) * line_h + row_gap
-    rows_h -= row_gap  # gap terakhir tidak perlu
+    row_line_h = 44
+    row_gap = 24
+    rows_h = sum(len(lines) * row_line_h for _, lines in rows)
+    rows_h += row_gap * (len(rows) - 1)
 
-    header_h = 190
-    body_top = header_h + 48
-    pill_h = 64
-    total_h = 96
-    foot_h = 110
-    height = (
-        body_top + pill_h + 40 + rows_h + 36 + 3 + total_h + 40 + foot_h + 48
+    # Tinggi tiap seksi (diukur dari font, supaya pas).
+    plate_h = 30 + _text_h(pdraw, "AETERNUM WEBSPACE", f_name) + 10
+    plate_h += _text_h(pdraw, "& PremiApp Bot", f_name2) + 30
+    title_h = _text_h(pdraw, "STRUK PEMBELIAN", f_title)
+    date_h = _text_h(pdraw, date_str, f_date)
+    ok_h = _text_h(pdraw, "PEMBAYARAN BERHASIL", f_ok)
+    total_h = max(
+        _text_h(pdraw, "TOTAL", f_total_label),
+        _text_h(pdraw, total, f_total_value),
     )
+    barcode_h = 84
+    barcode_num_h = _text_h(pdraw, invoice, f_barcode_num)
+    foot_h = _text_h(pdraw, "Terima kasih telah berbelanja di", f_foot)
+    foot_h += 8 + _text_h(pdraw, "Aeternum Webspace & PremiApp Bot", f_foot_bold)
 
-    img = Image.new("RGB", (width, height), bg)
+    top_margin = 30
+    tooth_depth = 18
+    top_pad = 46
+    bottom_pad = 46
+    content_h = (
+        top_pad
+        + plate_h + 34
+        + title_h + 6 + date_h + 26
+        + 4 + 26
+        + ok_h + 26
+        + 4 + 26
+        + rows_h + 26
+        + 4 + 22
+        + total_h + 26
+        + 4 + 30
+        + barcode_h + 10 + barcode_num_h + 30
+        + foot_h
+        + bottom_pad
+    )
+    height = top_margin + tooth_depth + content_h + tooth_depth + top_margin
+    y_top = top_margin + tooth_depth
+    y_bottom = y_top + content_h
+
+    img = Image.new("RGB", (width, height), cream)
     draw = ImageDraw.Draw(img)
 
-    # Kartu putih sudut membulat.
-    draw.rounded_rectangle(
-        [card_x0, 0, card_x1, height - margin], radius=44, fill=white
-    )
-    # Header kuning (menutupi sudut atas kartu).
-    draw.rounded_rectangle(
-        [card_x0, 0, card_x1, header_h], radius=44, fill=yellow
-    )
-    draw.rectangle([card_x0, header_h - 44, card_x1, header_h], fill=yellow)
-
-    draw.text((card_x0 + pad, 40), "AETERNUM", font=f_store, fill=ink)
-    draw.text(
-        (card_x0 + pad, 116), "STRUK PEMBELIAN", font=f_sub, fill=(74, 66, 0)
-    )
-    date_w = draw.textlength(date_str, font=f_date)
-    draw.text(
-        (card_x1 - pad - date_w, 52), date_str, font=f_date, fill=ink
+    # Kertas putih bergerigi.
+    draw.polygon(
+        _zigzag_points(paper_x0, paper_x1, y_top, y_bottom, depth=tooth_depth),
+        fill=paper,
     )
 
-    y = body_top
-    # Pill hijau.
-    pill_text = "PEMBAYARAN BERHASIL"
-    pill_w = draw.textlength(pill_text, font=f_pill) + 72
+    y = y_top + top_pad
+    # Pelat nama kuning.
+    plate_x0, plate_x1 = paper_x0 + 56, paper_x1 - 56
     draw.rounded_rectangle(
-        [card_x0 + pad, y, card_x0 + pad + pill_w, y + pill_h],
-        radius=32,
-        fill=green_bg,
+        [plate_x0, y, plate_x1, y + plate_h], radius=26, fill=yellow
     )
+    name1 = "AETERNUM WEBSPACE"
+    w1 = draw.textlength(name1, font=f_name)
     draw.text(
-        (card_x0 + pad + 36, y + 16), pill_text, font=f_pill, fill=green_text
+        ((width - w1) / 2, y + 30), name1, font=f_name, fill=ink
     )
-    y += pill_h + 40
+    name2 = "& PremiApp Bot"
+    w2 = draw.textlength(name2, font=f_name2)
+    draw.text(
+        ((width - w2) / 2, y + 30 + _text_h(draw, name1, f_name) + 10),
+        name2,
+        font=f_name2,
+        fill=ink,
+    )
+    y += plate_h + 34
 
-    # Baris-baris struk.
-    value_x = card_x1 - pad
+    # Judul + tanggal, rata tengah.
+    title = "STRUK PEMBELIAN"
+    tw = draw.textlength(title, font=f_title)
+    draw.text(((width - tw) / 2, y), title, font=f_title, fill=ink)
+    y += title_h + 6
+    dw = draw.textlength(date_str, font=f_date)
+    draw.text(((width - dw) / 2, y), date_str, font=f_date, fill=dim)
+    y += date_h + 26
+
+    _dashed_line(draw, paper_x0 + pad, paper_x1 - pad, y + 2, dash)
+    y += 4 + 26
+
+    ok_text = "PEMBAYARAN BERHASIL"
+    ow = draw.textlength(ok_text, font=f_ok)
+    draw.text(((width - ow) / 2, y), ok_text, font=f_ok, fill=green)
+    y += ok_h + 26
+
+    _dashed_line(draw, paper_x0 + pad, paper_x1 - pad, y + 2, dash)
+    y += 4 + 26
+
+    # Baris-baris struk: label kiri, nilai kanan.
+    value_x = paper_x1 - pad
     for idx, (label, lines) in enumerate(rows):
-        draw.text((card_x0 + pad, y), label, font=f_label, fill=grey)
+        draw.text((paper_x0 + pad, y), label, font=f_label, fill=dim)
         for li, line in enumerate(lines):
             lw = draw.textlength(line, font=f_value)
             draw.text(
-                (value_x - lw, y + li * line_h), line, font=f_value, fill=ink
+                (value_x - lw, y + li * row_line_h), line, font=f_value, fill=ink
             )
-        y += len(lines) * line_h + row_gap
+        y += len(lines) * row_line_h
         if idx < len(rows) - 1:
-            draw.line(
-                [(card_x0 + pad, y - 13), (card_x1 - pad, y - 13)],
-                fill=hairline,
-                width=2,
-            )
+            y += row_gap
 
-    # Garis tebal + TOTAL.
-    y += 36 - row_gap
-    draw.line(
-        [(card_x0 + pad, y), (card_x1 - pad, y)], fill=ink, width=3
-    )
-    y += 24
-    draw.text((card_x0 + pad, y + 8), "TOTAL", font=f_total_label, fill=ink)
+    y += 26
+    _dashed_line(draw, paper_x0 + pad, paper_x1 - pad, y + 2, dash)
+    y += 4 + 22
+
+    draw.text((paper_x0 + pad, y), "TOTAL", font=f_total_label, fill=ink)
     total_w = draw.textlength(total, font=f_total_value)
     draw.text((value_x - total_w, y), total, font=f_total_value, fill=ink)
-    y += total_h + 40
+    y += total_h + 26
+
+    _dashed_line(draw, paper_x0 + pad, paper_x1 - pad, y + 2, dash)
+    y += 4 + 30
+
+    # Barcode + nomor invoice.
+    barcode_w = 560
+    _barcode(draw, (width - barcode_w) // 2, y, barcode_w, barcode_h, invoice)
+    y += barcode_h + 10
+    bw = draw.textlength(invoice, font=f_barcode_num)
+    draw.text(((width - bw) / 2, y), invoice, font=f_barcode_num, fill=dim)
+    y += barcode_num_h + 30
 
     # Footer.
-    thanks = "Terima kasih telah berbelanja di Aeternum"
-    tw = draw.textlength(thanks, font=f_foot)
-    draw.text(((width - tw) / 2, y), thanks, font=f_foot, fill=light_grey)
-    iw = draw.textlength(invoice, font=f_foot_small)
-    draw.text(
-        ((width - iw) / 2, y + 44), invoice, font=f_foot_small, fill=(163, 158, 141)
-    )
+    thanks = "Terima kasih telah berbelanja di"
+    fw = draw.textlength(thanks, font=f_foot)
+    draw.text(((width - fw) / 2, y), thanks, font=f_foot, fill=dim)
+    y += _text_h(draw, thanks, f_foot) + 8
+    store = "Aeternum Webspace & PremiApp Bot"
+    sw = draw.textlength(store, font=f_foot_bold)
+    draw.text(((width - sw) / 2, y), store, font=f_foot_bold, fill=ink)
 
     out = io.BytesIO()
     img.save(out, format="JPEG", quality=92)
