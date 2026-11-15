@@ -3,7 +3,7 @@ Aeternum PremiApp Bot - Asynchronous Database CRUD Operations
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -914,7 +914,7 @@ async def mark_transaction_paid(
     trx = await get_transaction_by_id(session, transaction_id)
     if trx:
         trx.status = "PAID"
-        trx.paid_at = datetime.utcnow()
+        trx.paid_at = datetime.now(timezone.utc)
         if delivered_content:
             trx.delivered_content = delivered_content
         if expires_service_at:

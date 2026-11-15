@@ -302,7 +302,7 @@ async def cb_confirm_admin(
     product = await crud.get_product_by_id(session=session, product_id=trx.product_id)
     buyer = await crud.get_user_by_id(session=session, user_id=trx.user_id)
 
-    trx.admin_confirmed_at = datetime.utcnow()
+    trx.admin_confirmed_at = datetime.now(timezone.utc)
     await session.commit()
 
     buyer_label = f"ID {trx.user_id}"

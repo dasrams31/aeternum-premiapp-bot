@@ -3,7 +3,7 @@ Aeternum PremiApp Bot - Automated Fulfillment & Commission Engine
 Pengiriman produk instan, finalisasi stok terjual permanen, masa aktif langganan, komisi & review.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import os
 import re
@@ -267,7 +267,7 @@ async def deliver_purchased_product(
         # ==========================================
         expires_service_at = None
         if product.duration_days and product.duration_days > 0:
-            expires_service_at = datetime.utcnow() + timedelta(days=product.duration_days)
+            expires_service_at = datetime.now(timezone.utc) + timedelta(days=product.duration_days)
 
         # ==========================================
         # 6. CATAT PENGGUNAAN PROMO
