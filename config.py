@@ -45,7 +45,9 @@ class Settings(BaseSettings):
     # Channel Testimoni (Username @channel atau ID)
     TESTIMONIAL_CHANNEL_ID: Optional[str] = os.getenv("TESTIMONIAL_CHANNEL_ID", None)
 
-    # Channel & grup Peka (broadcast rutin + gate verifikasi gabung).
+    # Channel & grup Peka. Channel dipakai buat broadcast rutin (digest + info
+    # stok); sejak 16 Nov 2026 channel TIDAK lagi jadi syarat verifikasi,
+    # gate verifikasi hanya Grup Peka + Channel Aeternum.
     # ID terverifikasi 7 Nov 2026: bot administrator di keduanya.
     PEKA_CHANNEL_ID: int = int(os.getenv("PEKA_CHANNEL_ID", "-1001475296402"))
     PEKA_GROUP_ID: int = int(os.getenv("PEKA_GROUP_ID", "-1001167087205"))

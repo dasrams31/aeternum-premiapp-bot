@@ -23,13 +23,13 @@ async def cb_verify_check(callback: CallbackQuery, session: AsyncSession, bot: B
     user = callback.from_user
     is_admin = user.id == settings.ADMIN_ID
 
-    in_channel, in_group, in_aeternum = await check_membership(bot, user.id)
-    if in_channel and in_group and in_aeternum:
+    in_group, in_aeternum = await check_membership(bot, user.id)
+    if in_group and in_aeternum:
         await mark_verified(session, user.id)
         text = (
             f"✅ <b>VERIFIKASI BERHASIL!</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"Halo <b>{user.first_name}</b>, kamu sudah gabung Channel dan Grup Peka serta Channel Aeternum.\n"
+            f"Halo <b>{user.first_name}</b>, kamu sudah gabung Grup Peka serta Channel Aeternum.\n"
             f"Akses penuh bot sudah terbuka. Silakan pilih menu di bawah ini 👇"
         )
         if callback.message:
@@ -47,15 +47,13 @@ async def cb_verify_check(callback: CallbackQuery, session: AsyncSession, bot: B
         return
 
     missing = []
-    if not in_channel:
-        missing.append("Channel Peka")
     if not in_group:
         missing.append("Grup Peka")
     if not in_aeternum:
         missing.append("Channel Aeternum")
     if callback.message:
         await callback.message.edit_text(
-            text=verification_text(not in_channel, not in_group, not in_aeternum),
+            text=verification_text(not in_group, not in_aeternum),
             reply_markup=verification_keyboard(),
             parse_mode="HTML",
         )
