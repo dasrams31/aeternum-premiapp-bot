@@ -42,7 +42,12 @@ from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
 from aiogram import Bot
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    BufferedInputFile,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from sqlalchemy import select
 
 from config import settings
@@ -499,6 +504,20 @@ async def send_to_admin_dm(bot: Bot, text: str, **kwargs) -> bool:
         return False
 
 
+async def _send_receipt_photo(bot: Bot, chat_id: int, photo: bytes, caption: str) -> bool:
+    """Kirim gambar struk + caption teks. True bila terkirim."""
+    try:
+        await bot.send_photo(
+            chat_id=chat_id,
+            photo=BufferedInputFile(photo, filename="struk-aeternum.jpg"),
+            caption=caption,
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"Gagal kirim struk ke {chat_id}: {e}")
+        return False
+
+
 async def broadcast_to_all_users(
     bot: Bot,
     session,
@@ -614,23 +633,63 @@ async def broadcast_ready_digest_to_aeternum(bot: Bot, chunks: List[str]) -> int
 
 
 async def broadcast_transaction_success(
-    bot: Bot, product_name: str, amount: float, buyer_first_name: Optional[str]
+    bot: Bot,
+    product_name: str,
+    amount: float,
+    buyer_first_name: Optional[str] = None,
+    invoice_id: Optional[str] = None,
+    buyer_username: Optional[str] = None,
+    payment_method: Optional[str] = None,
+    paid_at: Optional[datetime] = None,
 ) -> bool:
     """Transaksi berhasil -> channel Aeternum + grup Peka + DM admin.
-    Tanpa data sensitif (tanpa WA, ID, atau isi akun)."""
-    buyer_line = (
-        f"👤 <b>Pembeli:</b> <b>{buyer_first_name}</b>\n" if buyer_first_name else ""
+
+    Format struk pembelian (perintah user 16 Nov 2026, meniru struk toko
+    referensi): gambar kartu struk + teks "STRUK PEMBELIAN" dengan detail
+    pembelian dan ID invoice Aeternum (Order), nama pembeli (@username bila
+    ada), metode, dan waktu WIB. Tanpa WA atau isi akun. Bila render gambar
+    gagal, kirim teks saja supaya broadcast tidak pernah hilang.
+    """
+    from bot.services.receipt import build_receipt_text, render_receipt_image
+
+    text = build_receipt_text(
+        product_name=product_name,
+        amount=amount,
+        invoice_id=invoice_id,
+        buyer_username=buyer_username,
+        buyer_first_name=buyer_first_name,
+        payment_method=payment_method,
+        paid_at=paid_at,
     )
-    text = (
-        f"✅ <b>TRANSAKSI BERHASIL!</b>\n\n"
-        f"📦 <b>Produk:</b> {product_name}\n"
-        f"💵 <b>Nominal:</b> <code>{_rupiah(amount)}</code>\n"
-        f"{buyer_line}\n"
-        f"Beli juga di @aeternum_premibot — bayar QRIS, langsung dikirim."
-    )
-    ok = await send_to_aeternum(bot, text)
-    await send_to_group(bot, text)
-    await send_to_admin_dm(bot, text)
+    try:
+        photo = render_receipt_image(
+            product_name=product_name,
+            amount=amount,
+            invoice_id=invoice_id,
+            buyer_username=buyer_username,
+            buyer_first_name=buyer_first_name,
+            payment_method=payment_method,
+            paid_at=paid_at,
+        )
+    except Exception as e:
+        logger.warning(f"Gagal render struk #{invoice_id}: {e}")
+        photo = None
+
+    if photo:
+        ok = await _send_receipt_photo(
+            bot, settings.AETERNUM_CHANNEL_ID, photo, text
+        )
+        await _send_receipt_photo(bot, settings.PEKA_GROUP_ID, photo, text)
+        await _send_receipt_photo(bot, settings.ADMIN_ID, photo, text)
+        if not ok:
+            ok = await send_to_aeternum(bot, html.escape(text))
+            await send_to_group(bot, html.escape(text))
+            await send_to_admin_dm(bot, html.escape(text))
+        return ok
+
+    ok = await send_to_aeternum(bot, html.escape(text))
+    await send_to_group(bot, html.escape(text))
+    await send_to_admin_dm(bot, html.escape(text))
     return ok
 
 

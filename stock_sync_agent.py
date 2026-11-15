@@ -446,7 +446,9 @@ async def cmd_prices():
 async def cmd_store_sale(payload):
     """Broadcast a store sale to the Aeternum channel, same format as a
     bot purchase (broadcast_transaction_success). Reads
-    {product, amount, buyer?} on stdin. No WA / ID / account content.
+    {product, amount, buyer?, invoice?, method?, username?} on stdin.
+    invoice/method/username optional: manual off-system sales have no
+    invoice, then Order shows "Manual". No WA / account content.
     Exits 1 on bad payload or failed broadcast (worker logs ERROR and
     leaves the row unsent for retry)."""
     from aiogram import Bot
@@ -472,6 +474,9 @@ async def cmd_store_sale(payload):
             product_name=str(product),
             amount=float(amount),
             buyer_first_name=buyer,
+            invoice_id=payload.get("invoice") or None,
+            buyer_username=payload.get("username") or None,
+            payment_method=payload.get("method") or None,
         )
     finally:
         await bot.session.close()

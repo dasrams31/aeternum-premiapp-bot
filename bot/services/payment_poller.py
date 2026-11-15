@@ -127,6 +127,10 @@ async def start_auto_payment_poller(bot: Bot, interval_seconds: int = 6) -> None
                                     product_name=product.name,
                                     amount=float(trx.amount),
                                     buyer_first_name=buyer.first_name if buyer else None,
+                                    invoice_id=trx.id,
+                                    buyer_username=buyer.username if buyer else None,
+                                    payment_method=trx.payment_method,
+                                    paid_at=trx.paid_at,
                                 )
 
                                 try:

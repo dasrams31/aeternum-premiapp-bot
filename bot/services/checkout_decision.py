@@ -172,6 +172,10 @@ async def process_checkout_decision(
             product_name=product.name,
             amount=float(trx.amount),
             buyer_first_name=buyer.first_name if buyer else None,
+            invoice_id=trx.id,
+            buyer_username=buyer.username if buyer else None,
+            payment_method=trx.payment_method,
+            paid_at=trx.paid_at or trx.manual_approved_at or trx.admin_confirmed_at,
         )
     buyer = await crud.get_user_by_id(session=session, user_id=trx.user_id)
     try:
