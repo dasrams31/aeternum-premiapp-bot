@@ -113,9 +113,11 @@ def render_receipt_image(
 ) -> bytes:
     """Gambar kartu struk (JPEG) meniru kartu struk referensi.
 
-    Header navy "AETERNUM / STRUK PEMBELIAN" + tanggal, pill hijau
-    "PEMBAYARAN BERHASIL", baris Order ID / Produk / Jumlah / Pembeli /
-    Metode / Waktu, garis tebal, TOTAL, lalu ucapan terima kasih.
+    Tema kuning + krem Peka (perintah user 16 Nov 2026): header kuning
+    Peka #FFD60A "AETERNUM / STRUK PEMBELIAN" + tanggal, kartu putih di
+    atas krem #F5F1E8, pill hijau "PEMBAYARAN BERHASIL", baris Order ID /
+    Produk / Jumlah / Pembeli / Metode / Waktu, garis tebal, TOTAL, lalu
+    ucapan terima kasih.
     """
     from PIL import Image, ImageDraw
 
@@ -124,13 +126,13 @@ def render_receipt_image(
     card_x0, card_x1 = margin, width - margin
     pad = 56
 
-    navy = (14, 27, 46)
-    bg = (11, 18, 32)
+    yellow = (255, 214, 10)  # Peka yellow #FFD60A
+    bg = (245, 241, 232)  # Peka cream #F5F1E8
     white = (255, 255, 255)
-    ink = (17, 24, 39)
-    grey = (107, 114, 128)
-    light_grey = (156, 163, 175)
-    hairline = (229, 231, 235)
+    ink = (13, 17, 23)
+    grey = (90, 86, 72)  # cream dim #5A5648
+    light_grey = (90, 86, 72)
+    hairline = (232, 226, 210)
     green_bg = (220, 252, 231)
     green_text = (21, 128, 61)
 
@@ -188,19 +190,19 @@ def render_receipt_image(
     draw.rounded_rectangle(
         [card_x0, 0, card_x1, height - margin], radius=44, fill=white
     )
-    # Header navy (menutupi sudut atas kartu).
+    # Header kuning (menutupi sudut atas kartu).
     draw.rounded_rectangle(
-        [card_x0, 0, card_x1, header_h], radius=44, fill=navy
+        [card_x0, 0, card_x1, header_h], radius=44, fill=yellow
     )
-    draw.rectangle([card_x0, header_h - 44, card_x1, header_h], fill=navy)
+    draw.rectangle([card_x0, header_h - 44, card_x1, header_h], fill=yellow)
 
-    draw.text((card_x0 + pad, 40), "AETERNUM", font=f_store, fill=white)
+    draw.text((card_x0 + pad, 40), "AETERNUM", font=f_store, fill=ink)
     draw.text(
-        (card_x0 + pad, 116), "STRUK PEMBELIAN", font=f_sub, fill=(148, 163, 184)
+        (card_x0 + pad, 116), "STRUK PEMBELIAN", font=f_sub, fill=(74, 66, 0)
     )
     date_w = draw.textlength(date_str, font=f_date)
     draw.text(
-        (card_x1 - pad - date_w, 52), date_str, font=f_date, fill=(203, 213, 225)
+        (card_x1 - pad - date_w, 52), date_str, font=f_date, fill=ink
     )
 
     y = body_top
@@ -251,7 +253,7 @@ def render_receipt_image(
     draw.text(((width - tw) / 2, y), thanks, font=f_foot, fill=light_grey)
     iw = draw.textlength(invoice, font=f_foot_small)
     draw.text(
-        ((width - iw) / 2, y + 44), invoice, font=f_foot_small, fill=(192, 198, 206)
+        ((width - iw) / 2, y + 44), invoice, font=f_foot_small, fill=(163, 158, 141)
     )
 
     out = io.BytesIO()
