@@ -35,6 +35,7 @@ tidak pernah rusak gara-gara broadcast.
 
 import asyncio
 import html
+import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -50,6 +51,12 @@ from database.models import Category, Product
 logger = logging.getLogger(__name__)
 
 KNOWN_PRODUCTS_FILE = Path(__file__).resolve().parent.parent.parent / "known_products.txt"
+LAST_GROUP_WELCOME_FILE = (
+    Path(__file__).resolve().parent.parent.parent / "last_group_welcome.json"
+)
+# Serializes welcome delete+send+store so two rapid joins cannot delete
+# each other's message.
+_WELCOME_LOCK = asyncio.Lock()
 
 BOT_USERNAME = "aeternum_premibot"
 BOT_DEEP_LINK_BASE = f"https://t.me/{BOT_USERNAME}"
@@ -656,17 +663,51 @@ def build_group_welcome_text(user_id: int, first_name: str, username: Optional[s
     )
 
 
+def _read_last_welcome_ids() -> dict:
+    """{str(chat_id): message_id} sambutan grup terakhir yang terkirim."""
+    try:
+        data = json.loads(LAST_GROUP_WELCOME_FILE.read_text())
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, ValueError, OSError):
+        return {}
+
+
+def _write_last_welcome_ids(ids: dict) -> None:
+    try:
+        LAST_GROUP_WELCOME_FILE.write_text(json.dumps(ids))
+    except OSError as e:
+        logger.warning(f"Tidak bisa tulis {LAST_GROUP_WELCOME_FILE}: {e}")
+
+
 async def welcome_new_group_member(
     bot: Bot, chat_id: int, user_id: int, first_name: str, username: Optional[str]
 ) -> bool:
-    """Member baru gabung GRUP -> sambutan + tag + info singkat Peka."""
+    """Member baru gabung GRUP -> sambutan + tag + info singkat Peka.
+
+    Rolling: hanya sambutan terbaru yang bertahan. Pesan sambutan lama
+    (id tersimpan di last_group_welcome.json) dihapus setelah sambutan
+    baru terkirim, lalu id baru disimpan. Kirim dulu baru hapus, supaya
+    sambutan tidak hilang bila kirim gagal.
+    """
     text = build_group_welcome_text(user_id, first_name, username)
-    try:
-        await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+    async with _WELCOME_LOCK:
+        prev_ids = _read_last_welcome_ids()
+        prev_id = prev_ids.get(str(chat_id))
+        try:
+            sent = await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        except Exception as e:
+            logger.warning(f"Gagal kirim sambutan member baru ke {chat_id}: {e}")
+            return False
+        if prev_id:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=int(prev_id))
+            except Exception as e:
+                logger.warning(
+                    f"Gagal hapus sambutan lama {prev_id} di {chat_id}: {e}"
+                )
+        prev_ids[str(chat_id)] = sent.message_id
+        _write_last_welcome_ids(prev_ids)
         return True
-    except Exception as e:
-        logger.warning(f"Gagal kirim sambutan member baru ke {chat_id}: {e}")
-        return False
 
 
 def _read_known_ids() -> Set[int]:
