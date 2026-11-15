@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
 from aiogram import Bot
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import select
 
 from config import settings
@@ -53,6 +53,9 @@ logger = logging.getLogger(__name__)
 KNOWN_PRODUCTS_FILE = Path(__file__).resolve().parent.parent.parent / "known_products.txt"
 LAST_GROUP_WELCOME_FILE = (
     Path(__file__).resolve().parent.parent.parent / "last_group_welcome.json"
+)
+LAST_DIGEST_PIN_FILE = (
+    Path(__file__).resolve().parent.parent.parent / "last_digest_pin.json"
 )
 # Serializes welcome delete+send+store so two rapid joins cannot delete
 # each other's message.
@@ -438,6 +441,17 @@ async def send_to_channel(bot: Bot, text: str, **kwargs) -> bool:
         return False
 
 
+async def send_to_channel_msg(bot: Bot, text: str, **kwargs) -> Optional[Message]:
+    """Kirim satu pesan ke channel Peka, kembalikan Message (None bila gagal)."""
+    try:
+        return await bot.send_message(
+            chat_id=settings.PEKA_CHANNEL_ID, text=text, parse_mode="HTML", **kwargs
+        )
+    except Exception as e:
+        logger.warning(f"Gagal kirim ke channel Peka: {e}")
+        return None
+
+
 async def send_to_aeternum(bot: Bot, text: str, **kwargs) -> bool:
     """Kirim satu pesan ke channel Aeternum (@aeternum_premich). True bila terkirim."""
     try:
@@ -448,6 +462,17 @@ async def send_to_aeternum(bot: Bot, text: str, **kwargs) -> bool:
     except Exception as e:
         logger.warning(f"Gagal kirim ke channel Aeternum: {e}")
         return False
+
+
+async def send_to_aeternum_msg(bot: Bot, text: str, **kwargs) -> Optional[Message]:
+    """Kirim satu pesan ke channel Aeternum, kembalikan Message (None bila gagal)."""
+    try:
+        return await bot.send_message(
+            chat_id=settings.AETERNUM_CHANNEL_ID, text=text, parse_mode="HTML", **kwargs
+        )
+    except Exception as e:
+        logger.warning(f"Gagal kirim ke channel Aeternum: {e}")
+        return None
 
 
 async def send_to_group(bot: Bot, text: str, **kwargs) -> bool:
@@ -507,30 +532,84 @@ async def broadcast_to_all_users(
     return sent, failed
 
 
+def _read_last_digest_pins() -> dict:
+    """{str(chat_id): message_id} digest yang sedang ter-pin di tiap channel."""
+    try:
+        data = json.loads(LAST_DIGEST_PIN_FILE.read_text())
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, ValueError, OSError):
+        return {}
+
+
+def _write_last_digest_pins(ids: dict) -> None:
+    try:
+        LAST_DIGEST_PIN_FILE.write_text(json.dumps(ids))
+    except OSError as e:
+        logger.warning(f"Tidak bisa tulis {LAST_DIGEST_PIN_FILE}: {e}")
+
+
+async def pin_digest_message(bot: Bot, chat_id: int, message_id: int) -> None:
+    """Pin digest terbaru di channel (tanpa notifikasi), lalu unpin digest
+    hari sebelumnya supaya hanya yang terbaru yang ter-pin. Gagal pin/unpin
+    hanya dicatat, tidak menggagalkan digest."""
+    try:
+        await bot.pin_chat_message(
+            chat_id=chat_id, message_id=message_id, disable_notification=True
+        )
+    except Exception as e:
+        logger.warning(f"Gagal pin digest {message_id} di {chat_id}: {e}")
+        return
+    pins = _read_last_digest_pins()
+    prev_id = pins.get(str(chat_id))
+    if prev_id and int(prev_id) != message_id:
+        try:
+            await bot.unpin_chat_message(chat_id=chat_id, message_id=int(prev_id))
+        except Exception as e:
+            logger.warning(f"Gagal unpin digest lama {prev_id} di {chat_id}: {e}")
+    pins[str(chat_id)] = message_id
+    _write_last_digest_pins(pins)
+
+
 async def broadcast_ready_digest_to_channel(bot: Bot, chunks: List[str]) -> int:
     """Kirim ringkasan stok ready harian ke channel Peka (grup ikut dapat
     lewat discussion yang terhubung, tanpa kirim dobel). Kembalikan jumlah pesan terkirim."""
     sent = 0
+    first_id = None
     for i, chunk in enumerate(chunks):
         kb = digest_kb() if i == len(chunks) - 1 else None
-        if await send_to_channel(bot, chunk, reply_markup=kb):
+        if i == 0:
+            msg = await send_to_channel_msg(bot, chunk, reply_markup=kb)
+            if msg:
+                first_id = msg.message_id
+                sent += 1
+        elif await send_to_channel(bot, chunk, reply_markup=kb):
             sent += 1
-            await asyncio.sleep(0.3)
+        await asyncio.sleep(0.3)
     if sent:
         logger.info("Ready digest terkirim ke channel Peka (%s pesan).", sent)
+    if first_id:
+        await pin_digest_message(bot, settings.PEKA_CHANNEL_ID, first_id)
     return sent
 
 
 async def broadcast_ready_digest_to_aeternum(bot: Bot, chunks: List[str]) -> int:
     """Kirim ringkasan stok ready harian ke channel Aeternum. Kembalikan jumlah pesan terkirim."""
     sent = 0
+    first_id = None
     for i, chunk in enumerate(chunks):
         kb = digest_kb() if i == len(chunks) - 1 else None
-        if await send_to_aeternum(bot, chunk, reply_markup=kb):
+        if i == 0:
+            msg = await send_to_aeternum_msg(bot, chunk, reply_markup=kb)
+            if msg:
+                first_id = msg.message_id
+                sent += 1
+        elif await send_to_aeternum(bot, chunk, reply_markup=kb):
             sent += 1
-            await asyncio.sleep(0.3)
+        await asyncio.sleep(0.3)
     if sent:
         logger.info("Ready digest terkirim ke channel Aeternum (%s pesan).", sent)
+    if first_id:
+        await pin_digest_message(bot, settings.AETERNUM_CHANNEL_ID, first_id)
     return sent
 
 
