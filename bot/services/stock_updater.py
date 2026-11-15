@@ -281,6 +281,7 @@ def build_ready_digest_chunks(ready: List[Tuple[Product, Optional[int], str]]) -
     footer = (
         "\nBila berminat, ketuk tombol di bawah untuk buka bot, "
         "lalu pilih 🛍️ Katalog Produk untuk memesan!"
+        "\n\n📱 Grup WhatsApp Peka: s.peka.ai.id/k4iKBr"
     )
     lines = [header]
     current_cat = None
