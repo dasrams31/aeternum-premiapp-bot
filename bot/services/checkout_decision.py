@@ -167,6 +167,8 @@ async def process_checkout_decision(
     )
     if delivered and broadcast:
         buyer = await crud.get_user_by_id(session=session, user_id=trx.user_id)
+        _qty = int(getattr(trx, "quantity", 1) or 1)
+        _unit = float(trx.original_amount or trx.amount) / _qty if _qty > 0 else float(trx.amount)
         await broadcast_transaction_success(
             bot,
             product_name=product.name,
@@ -176,8 +178,12 @@ async def process_checkout_decision(
             buyer_username=buyer.username if buyer else None,
             payment_method=trx.payment_method,
             paid_at=trx.paid_at or trx.manual_approved_at or trx.admin_confirmed_at,
+            quantity=_qty,
+            unit_price=_unit,
         )
     buyer = await crud.get_user_by_id(session=session, user_id=trx.user_id)
+    _qty = int(getattr(trx, "quantity", 1) or 1)
+    _plabel = f"{product.name} × {_qty}" if _qty > 1 else product.name
     try:
         await bot.send_message(
             chat_id=settings.ADMIN_ID,
@@ -188,7 +194,7 @@ async def process_checkout_decision(
                 f"💰 <b>NOTIFIKASI PEMBELIAN MANUAL!</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🆔 <b>Invoice:</b> <code>#{trx.id}</code>\n"
-                f"📦 <b>Produk:</b> {product.name}\n"
+                f"📦 <b>Produk:</b> {_plabel}\n"
                 f"💵 <b>Nominal:</b> <code>{_rupiah(trx.amount)}</code>\n"
                 f"👤 <b>Pembeli ID:</b> <code>{trx.user_id}</code>\n"
                 f"✅ <b>Status Pengiriman:</b> {'Terkirim Otomatis' if delivered else 'Perlu Pengecekan'}\n"

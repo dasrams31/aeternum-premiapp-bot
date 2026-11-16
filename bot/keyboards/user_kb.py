@@ -193,11 +193,26 @@ def product_detail_kb(
     current_price: float = 0.0,
     has_promo: bool = False,
     is_subscribed: bool = False,
+    quantity: int = 1,
+    max_quantity: int = 10,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     price_to_pay = current_price or float(product.price)
+    # Jumlah pembelian (1-10). Default 1 = perilaku lama, tanpa perubahan.
+    quantity = max(1, min(int(quantity or 1), max(1, int(max_quantity or 10))))
+    total_price = price_to_pay * quantity
+    fmt_total = f"Rp {total_price:,.0f}".replace(",", ".")
 
     if is_available:
+        # Stepper jumlah: [➖] [Jumlah: N] [➕] di atas tombol Beli.
+        builder.row(
+            InlineKeyboardButton(text="➖", callback_data=f"qtyminus_{product.id}"),
+            InlineKeyboardButton(
+                text=f"Jumlah: {quantity}",
+                callback_data=f"qtyinfo_{product.id}",
+            ),
+            InlineKeyboardButton(text="➕", callback_data=f"qtyplus_{product.id}"),
+        )
         fmt_bal = f"Rp {user_balance:,.0f}".replace(",", ".")
         builder.row(
             InlineKeyboardButton(
@@ -205,9 +220,13 @@ def product_detail_kb(
                 callback_data=f"pay_balance_{product.id}"
             )
         )
+        if quantity > 1:
+            buy_text = f"⚡ Beli {quantity}x — {fmt_total}"
+        else:
+            buy_text = "⚡ Beli Sekarang via QRIS"
         builder.row(
             InlineKeyboardButton(
-                text="⚡ Beli Sekarang via QRIS",
+                text=buy_text,
                 callback_data=f"buy_{product.id}"
             )
         )

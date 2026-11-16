@@ -592,6 +592,19 @@ def _emit_stock_sync_event(
     return ev
 
 
+async def max_order_quantity(
+    session: AsyncSession, product: Product
+) -> int:
+    """Batas atas jumlah pembelian (1-10) untuk satu transaksi.
+
+    TEXT_STOCK dibatasi stok tersedia (maksimal 10); tipe lain selalu 10.
+    """
+    if product.product_type == "TEXT_STOCK":
+        stock = await count_available_stock(session=session, product_id=product.id)
+        return max(0, min(stock, 10))
+    return 10
+
+
 async def reserve_stock_item_atomic(
     session: AsyncSession, product_id: int, transaction_id: str, duration_minutes: int = 15
 ) -> Optional[ProductItem]:
@@ -622,6 +635,56 @@ async def reserve_stock_item_atomic(
     return item
 
 
+async def reserve_stock_items_atomic(
+    session: AsyncSession,
+    product_id: int,
+    transaction_id: str,
+    quantity: int,
+    duration_minutes: int = 15,
+) -> Optional[List[ProductItem]]:
+    """Reserve N item stok secara atomik untuk satu invoice.
+
+    Mengunci N item tersedia (SKIP LOCKED). Bila yang didapat < N, TIDAK
+    ada yang di-reserve (lock dilepas via rollback) dan return None, supaya
+    pemanggil tidak pernah membuat invoice setengah. Event sync delta -N
+    di-emit sekali untuk seluruh batch.
+    """
+    if quantity < 1:
+        return None
+    now = datetime.utcnow()
+    stmt = (
+        select(ProductItem)
+        .where(ProductItem.product_id == product_id)
+        .where(ProductItem.is_sold.is_(False))
+        .where(
+            or_(
+                ProductItem.reserved_until.is_(None),
+                ProductItem.reserved_until < now,
+            )
+        )
+        .with_for_update(skip_locked=True)
+        .limit(quantity)
+    )
+    result = await session.execute(stmt)
+    items = list(result.scalars().all())
+
+    if len(items) < quantity:
+        # Stok kurang: lepas lock, jangan reserve apa pun.
+        await session.rollback()
+        return None
+
+    for item in items:
+        item.reserved_by_trx = transaction_id
+        item.reserved_until = now + timedelta(minutes=duration_minutes)
+    _emit_stock_sync_event(
+        session, product_id, "delta", delta=-len(items), ref=transaction_id
+    )
+    await session.commit()
+    for item in items:
+        await session.refresh(item)
+    return items
+
+
 async def release_reserved_stock(
     session: AsyncSession, transaction_id: str
 ) -> bool:
@@ -639,28 +702,47 @@ async def release_reserved_stock(
         .values(reserved_by_trx=None, reserved_until=None)
     )
     res = await session.execute(stmt)
-    released = (res.rowcount or 0) > 0
+    released_count = res.rowcount or 0
+    released = released_count > 0
     if released and product_id is not None:
-        _emit_stock_sync_event(session, product_id, "delta", delta=1, ref=transaction_id)
+        # Emit delta sebesar jumlah item yang benar-benar dilepas (bukan 1),
+        # supaya stok toko sinkron dengan benar untuk pesanan multi-item.
+        _emit_stock_sync_event(
+            session, product_id, "delta", delta=released_count, ref=transaction_id
+        )
     await session.commit()
     return released
 
 
-async def finalize_reserved_stock(
-    session: AsyncSession, product_id: int, transaction_id: str
-) -> Optional[ProductItem]:
+async def finalize_reserved_stock_multi(
+    session: AsyncSession,
+    product_id: int,
+    transaction_id: str,
+    quantity: int = 1,
+) -> List[ProductItem]:
+    """Finalisasi SEMUA item milik satu invoice menjadi TERJUAL.
+
+    Ambil dulu item yang ter-reserve untuk trx ini (maksimal quantity),
+    lalu lengkapi dari stok bebas bila reservasi kurang (fallback lama).
+    Item fallback ikut emit sync delta -1 karena belum pernah di-reserve.
+    Bila total yang didapat < quantity, TIDAK ada yang ditandai terjual
+    (lock dilepas, return []) supaya tidak terjadi pengiriman sebagian.
+    Konten tiap item didekripsi sebelum dikembalikan. List kosong = stok
+    benar-benar habis.
+    """
+    if quantity < 1:
+        return []
     stmt = (
         select(ProductItem)
         .where(ProductItem.reserved_by_trx == transaction_id)
         .where(ProductItem.is_sold.is_(False))
         .with_for_update(skip_locked=True)
-        .limit(1)
+        .limit(quantity)
     )
     res = await session.execute(stmt)
-    item = res.scalar_one_or_none()
-    was_reserved = item is not None
+    items = list(res.scalars().all())
 
-    if not item:
+    if len(items) < quantity:
         now = datetime.utcnow()
         stmt_fallback = (
             select(ProductItem)
@@ -673,26 +755,47 @@ async def finalize_reserved_stock(
                 )
             )
             .with_for_update(skip_locked=True)
-            .limit(1)
+            .limit(quantity - len(items))
         )
         res_fallback = await session.execute(stmt_fallback)
-        item = res_fallback.scalar_one_or_none()
+        items.extend(list(res_fallback.scalars().all()))
 
-    if item:
-        if not was_reserved:
-            # Fallback mengambil item tanpa reservasi: belum ada event -1.
-            _emit_stock_sync_event(session, product_id, "delta", delta=-1, ref=transaction_id)
+    if len(items) < quantity:
+        # Stok kurang: jangan tandai apa pun sebagai terjual.
+        await session.rollback()
+        return []
+
+    fallback_count = quantity - sum(
+        1 for it in items if it.reserved_by_trx == transaction_id
+    )
+    for _ in range(fallback_count):
+        # Fallback mengambil item tanpa reservasi: belum ada event -1.
+        _emit_stock_sync_event(
+            session, product_id, "delta", delta=-1, ref=transaction_id
+        )
+
+    for item in items:
         item.is_sold = True
         item.sold_at = datetime.utcnow()
         item.transaction_id = transaction_id
         item.reserved_by_trx = None
         item.reserved_until = None
-        await session.commit()
+    await session.commit()
+    for item in items:
         await session.refresh(item)
         # Dekripsi konten sebelum digunakan di fulfillment
         item.content = decrypt_text(item.content)
 
-    return item
+    return items
+
+
+async def finalize_reserved_stock(
+    session: AsyncSession, product_id: int, transaction_id: str
+) -> Optional[ProductItem]:
+    items = await finalize_reserved_stock_multi(
+        session, product_id, transaction_id, quantity=1
+    )
+    return items[0] if items else None
 
 
 async def release_all_expired_reservations(session: AsyncSession) -> int:
@@ -838,6 +941,7 @@ async def create_transaction(
     gateway_reference: Optional[str] = None,
     expired_at: Optional[datetime] = None,
     telegram_message_id: Optional[int] = None,
+    quantity: int = 1,
 ) -> Transaction:
     trx = Transaction(
         id=invoice_id,
@@ -850,6 +954,7 @@ async def create_transaction(
         referral_discount=referral_discount,
         promo_code=promo_code,
         amount=amount,
+        quantity=max(1, int(quantity or 1)),
         qris_string=qris_string,
         qris_image_url=qris_image_url,
         gateway_reference=gateway_reference,

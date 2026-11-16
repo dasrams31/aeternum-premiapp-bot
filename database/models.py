@@ -256,7 +256,13 @@ class Transaction(Base):
     referral_discount: Mapped[float] = mapped_column(Numeric(12, 2), default=0.0)
     promo_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
-    
+
+    # Jumlah unit yang dibeli dalam transaksi ini (1-10). Ditambah 16 Nov 2026
+    # untuk fitur quantity; transaksi lama bernilai 1 via migrasi DEFAULT 1.
+    quantity: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", nullable=False
+    )
+
     qris_string: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     qris_image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     gateway_reference: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

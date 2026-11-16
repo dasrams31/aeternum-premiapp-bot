@@ -140,6 +140,7 @@ async def notify_admin_checkout_attempt(
     buyer_label: str,
     buyer_username: Optional[str],
     gateway_ok: bool,
+    quantity: int = 1,
 ) -> bool:
     """DM admin realtime tiap ada percobaan checkout (invoice QRIS dibuat).
 
@@ -155,9 +156,13 @@ async def notify_admin_checkout_attempt(
             "⚠️ <b>Gateway:</b> GAGAL, QR fallback (bukan QR KlikQRIS). "
             "Pembeli mungkin bayar ke QRIS statis, cek manual."
         )
+    qty_line = (
+        f"🔢 <b>Jumlah:</b> {quantity}x\n" if int(quantity or 1) > 1 else ""
+    )
     text = (
         f"🛒 <b>PERCOBAAN CHECKOUT</b>\n\n"
         f"📦 <b>Produk:</b> {html.escape(product_label)}\n"
+        f"{qty_line}"
         f"👤 <b>Pembeli:</b> {html.escape(buyer_label)}\n"
         f"🆔 <b>ID:</b> <code>{buyer_id}</code>\n"
         f"💰 <b>Nominal:</b> {_rupiah(amount)}\n"
@@ -641,6 +646,8 @@ async def broadcast_transaction_success(
     buyer_username: Optional[str] = None,
     payment_method: Optional[str] = None,
     paid_at: Optional[datetime] = None,
+    quantity: int = 1,
+    unit_price: Optional[float] = None,
 ) -> bool:
     """Transaksi berhasil -> channel Aeternum + grup Peka + DM admin.
 
@@ -660,6 +667,8 @@ async def broadcast_transaction_success(
         buyer_first_name=buyer_first_name,
         payment_method=payment_method,
         paid_at=paid_at,
+        quantity=quantity,
+        unit_price=unit_price,
     )
     try:
         photo = render_receipt_image(
@@ -670,6 +679,8 @@ async def broadcast_transaction_success(
             buyer_first_name=buyer_first_name,
             payment_method=payment_method,
             paid_at=paid_at,
+            quantity=quantity,
+            unit_price=unit_price,
         )
     except Exception as e:
         logger.warning(f"Gagal render struk #{invoice_id}: {e}")

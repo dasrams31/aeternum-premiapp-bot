@@ -92,6 +92,11 @@ async def deliver_purchased_product(
     """
     user_id = transaction.user_id
     delivered_text = ""
+    # Jumlah unit yang dibeli (1-10); transaksi lama bernilai 1.
+    quantity = int(getattr(transaction, "quantity", 1) or 1)
+    product_label = (
+        f"{product.name} × {quantity}" if quantity > 1 else product.name
+    )
 
     # Hapus pesan invoice QRIS agar tidak menumpuk di chat pembeli
     if transaction.telegram_message_id:
@@ -105,13 +110,14 @@ async def deliver_purchased_product(
         # 1. TIPE: TEXT_STOCK (Finalisasi Kunci Stok ke Terjual)
         # ==========================================
         if product.product_type == "TEXT_STOCK":
-            item = await crud.finalize_reserved_stock(
+            items = await crud.finalize_reserved_stock_multi(
                 session=session,
                 product_id=product.id,
                 transaction_id=transaction.id,
+                quantity=quantity,
             )
 
-            if not item:
+            if len(items) < quantity:
                 logger.error(f"Stok habis mendadak untuk order #{transaction.id}")
                 await bot.send_message(
                     chat_id=user_id,
@@ -124,14 +130,18 @@ async def deliver_purchased_product(
                 )
                 return False
 
-            delivered_text = item.content
-            
+            # Gabungkan isi semua item, dipisah garis; tiap item sudah
+            # didekripsi oleh finalize_reserved_stock_multi.
+            delivered_text = "\n\n────────────────────\n\n".join(
+                item.content for item in items
+            )
+
             war_badge = "❌ Tidak Ada Garansi" if product.warranty_type == "NONE" else ("⚡ Garansi 24 Jam" if product.warranty_type == "24_HOURS" else "📝 Garansi Khusus")
             war_desc = f"\n<i>{product.warranty_note}</i>" if product.warranty_note else ""
 
             message_text = (
                 f"🎉 <b>PEMBAYARAN BERHASIL & TERKONFIRMASI!</b>\n\n"
-                f"📦 <b>Produk:</b> {product.name}\n"
+                f"📦 <b>Produk:</b> {product_label}\n"
                 f"🧾 <b>No. Invoice:</b> <code>{transaction.id}</code>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🔑 <b>DETAIL KREDENSIAL / LISENSI ANDA:</b>\n\n"
@@ -173,7 +183,7 @@ async def deliver_purchased_product(
 
             message_text = (
                 f"🎉 <b>PEMBAYARAN BERHASIL & TERKONFIRMASI!</b>\n\n"
-                f"📦 <b>Produk:</b> {product.name}\n"
+                f"📦 <b>Produk:</b> {product_label}\n"
                 f"🧾 <b>No. Invoice:</b> <code>{transaction.id}</code>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"📝 <b>KONTEN PRODUK / AKSES:</b>\n\n"
@@ -207,7 +217,7 @@ async def deliver_purchased_product(
 
             caption = (
                 f"🎉 <b>PEMBAYARAN BERHASIL!</b>\n\n"
-                f"📦 <b>Produk:</b> {product.name}\n"
+                f"📦 <b>Produk:</b> {product_label}\n"
                 f"🧾 <b>No. Invoice:</b> <code>{transaction.id}</code>\n\n"
                 f"🛡️ <b>Ketentuan Garansi:</b> <b>{war_badge}</b>{war_desc}\n\n"
                 f"File produk Anda terlampir di atas. Selamat menikmati!"
@@ -243,7 +253,7 @@ async def deliver_purchased_product(
 
             message_text = (
                 f"🎉 <b>PEMBAYARAN BERHASIL & TERKONFIRMASI!</b>\n\n"
-                f"📦 <b>Produk:</b> {product.name}\n"
+                f"📦 <b>Produk:</b> {product_label}\n"
                 f"🧾 <b>No. Invoice:</b> <code>{transaction.id}</code>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🔗 <b>TAUTAN UNDANGAN VIP ANDA:</b>\n\n"
@@ -347,7 +357,7 @@ async def deliver_purchased_product(
                 price_str = f"Rp {float(transaction.amount or 0):,.0f}".replace(",", ".")
                 admin_text = (
                     f"🛒 <b>PEMBELIAN BARU</b>\n\n"
-                    f"📦 <b>Produk:</b> {product.name}\n"
+                    f"📦 <b>Produk:</b> {product_label}\n"
                     f"👤 <b>Pembeli:</b> {buyer_label}\n"
                     f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
                     f"💰 <b>Harga:</b> {price_str}\n"

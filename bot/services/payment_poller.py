@@ -122,6 +122,9 @@ async def start_auto_payment_poller(bot: Bot, interval_seconds: int = 6) -> None
                                 )
                                 # Broadcast rutin: transaksi berhasil -> channel Peka
                                 buyer = await crud.get_user_by_id(session=session, user_id=trx.user_id)
+                                _qty = int(getattr(trx, "quantity", 1) or 1)
+                                _unit = float(trx.original_amount or trx.amount) / _qty if _qty > 0 else float(trx.amount)
+                                _plabel = f"{product.name} × {_qty}" if _qty > 1 else product.name
                                 await broadcast_transaction_success(
                                     bot,
                                     product_name=product.name,
@@ -131,6 +134,8 @@ async def start_auto_payment_poller(bot: Bot, interval_seconds: int = 6) -> None
                                     buyer_username=buyer.username if buyer else None,
                                     payment_method=trx.payment_method,
                                     paid_at=trx.paid_at,
+                                    quantity=_qty,
+                                    unit_price=_unit,
                                 )
 
                                 try:
@@ -141,7 +146,7 @@ async def start_auto_payment_poller(bot: Bot, interval_seconds: int = 6) -> None
                                             f"💰 <b>NOTIFIKASI PEMBELIAN OTOMATIS!</b>\n"
                                             f"━━━━━━━━━━━━━━━━━━━━━\n"
                                             f"🆔 <b>Invoice:</b> <code>#{trx.id}</code>\n"
-                                            f"📦 <b>Produk:</b> {product.name}\n"
+                                            f"📦 <b>Produk:</b> {_plabel}\n"
                                             f"💵 <b>Nominal:</b> <code>{formatted_amount}</code>\n"
                                             f"👤 <b>Pembeli ID:</b> <code>{trx.user_id}</code>\n"
                                             f"✅ <b>Status Pengiriman:</b> {'Terkirim Otomatis' if delivered else 'Perlu Pengecekan'}\n"

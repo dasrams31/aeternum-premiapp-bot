@@ -69,12 +69,25 @@ def build_receipt_text(
     buyer_first_name: Optional[str] = None,
     payment_method: Optional[str] = None,
     paid_at: Optional[datetime] = None,
+    quantity: int = 1,
+    unit_price: Optional[float] = None,
 ) -> str:
-    """Teks struk, meniru blok teks struk referensi (tanpa HTML)."""
+    """Teks struk, meniru blok teks struk referensi (tanpa HTML).
+
+    qty=1 tampilannya identik lama ("Jumlah: 1x"); qty>1 tampil
+    "Jumlah: Nx @ Rp<harga satuan>".
+    """
+    quantity = max(1, int(quantity or 1))
+    if quantity > 1 and unit_price:
+        qty_line = f"Jumlah: {quantity}x @ {_rupiah(unit_price)}"
+    elif quantity > 1:
+        qty_line = f"Jumlah: {quantity}x"
+    else:
+        qty_line = "Jumlah: 1x"
     return (
         "🧾 STRUK PEMBELIAN\n"
         f"Produk: {product_name}\n"
-        "Jumlah: 1x\n"
+        f"{qty_line}\n"
         f"Order: {invoice_id or 'Manual'}\n"
         f"Total: {_rupiah(amount)}\n"
         f"Pembeli: {buyer_display(buyer_username, buyer_first_name)}\n"
@@ -178,6 +191,8 @@ def render_receipt_image(
     buyer_first_name: Optional[str] = None,
     payment_method: Optional[str] = None,
     paid_at: Optional[datetime] = None,
+    quantity: int = 1,
+    unit_price: Optional[float] = None,
 ) -> bytes:
     """Gambar struk kertas ala Peka (JPEG).
 
@@ -219,7 +234,9 @@ def render_receipt_image(
     invoice = invoice_id or "Manual"
     buyer = buyer_display(buyer_username, buyer_first_name)
     method = format_method(payment_method)
-    qty = f"1x @ {_rupiah(amount)}"
+    # qty=1: "1x @ <total>" identik lama; qty>1: "Nx @ <harga satuan>".
+    quantity = max(1, int(quantity or 1))
+    qty = f"{quantity}x @ {_rupiah(unit_price if unit_price else amount)}"
     total = _rupiah(amount)
 
     probe = Image.new("RGB", (10, 10))

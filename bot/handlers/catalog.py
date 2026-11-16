@@ -114,11 +114,16 @@ async def cb_show_category_products(
     await callback.answer()
 
 
-async def render_product_detail(session, product_id, user_id):
+async def render_product_detail(
+    session, product_id, user_id, quantity: int = 1,
+    current_price: float | None = None, has_promo: bool = False,
+):
     """Bangun (teks, keyboard) detail produk.
 
     Dipakai handler detail katalog dan deep-link /start product_<id> /
     /start remind_<id> supaya tampilannya selalu sama.
+    quantity: jumlah pembelian yang sedang dipilih (1-10, default 1 =
+    tampilan lama). current_price: harga satuan setelah promo bila ada.
     """
     product = await crud.get_product_by_id(session=session, product_id=product_id)
     if not product:
@@ -145,6 +150,10 @@ async def render_product_detail(session, product_id, user_id):
         else:
             stock_info = "🟢 <b>Jumlah Stok:</b> <code>Tersedia (Ready Instan 24/7)</code>"
 
+    max_quantity = await crud.max_order_quantity(session, product)
+    quantity = max(1, min(int(quantity or 1), max(1, max_quantity))) if is_available else 1
+    unit_price = float(current_price) if current_price else float(product.price)
+
     formatted_price = f"Rp {product.price:,.0f}".replace(",", ".")
     formatted_balance = f"Rp {user_balance:,.0f}".replace(",", ".")
     desc_text = product.description or "Tidak ada deskripsi tambahan."
@@ -156,10 +165,17 @@ async def render_product_detail(session, product_id, user_id):
     if product.warranty_note:
         war_info += f" <i>({product.warranty_note})</i>"
 
+    # Baris jumlah hanya tampil bila qty > 1; qty=1 tampilannya identik lama.
+    qty_line = ""
+    if quantity > 1:
+        fmt_unit = f"Rp {unit_price:,.0f}".replace(",", ".")
+        fmt_total = f"Rp {unit_price * quantity:,.0f}".replace(",", ".")
+        qty_line = f"\n🔢 <b>Jumlah:</b> <code>{quantity}x @ {fmt_unit}</code> = <code>{fmt_total}</code>"
+
     text = (
         f"📦 <b>DETAIL PRODUK: {product.name.upper()}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💵 <b>Harga:</b> <code>{formatted_price}</code>\n"
+        f"💵 <b>Harga:</b> <code>{formatted_price}</code>{qty_line}\n"
         f"💳 <b>Saldo Anda:</b> <code>{formatted_balance}</code>\n"
         f"{stock_info}{duration_info}{war_info}\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -178,8 +194,11 @@ async def render_product_detail(session, product_id, user_id):
         product=product,
         is_available=is_available,
         user_balance=user_balance,
-        current_price=float(product.price),
+        current_price=unit_price,
+        has_promo=has_promo,
         is_subscribed=is_subscribed,
+        quantity=quantity,
+        max_quantity=max_quantity,
     )
     return text, kb
 
@@ -206,11 +225,75 @@ async def cb_show_product_detail(
 
 
 # ==========================================
+# STEPPER JUMLAH PEMBELIAN (1-10)
+# ==========================================
+@router.callback_query(F.data.startswith("qtyplus_"))
+@router.callback_query(F.data.startswith("qtyminus_"))
+async def cb_change_quantity(
+    callback: CallbackQuery, session: AsyncSession, state: FSMContext
+) -> None:
+    """Ubah jumlah pembelian di state lalu render ulang detail produk."""
+    is_plus = callback.data.startswith("qtyplus_")
+    product_id = int(callback.data.replace("qtyplus_", "").replace("qtyminus_", ""))
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+    if not product or not product.is_active:
+        await callback.answer("Produk tidak tersedia!", show_alert=True)
+        return
+
+    max_quantity = await crud.max_order_quantity(session, product)
+    if max_quantity < 1:
+        await callback.answer("Stok produk ini baru saja habis!", show_alert=True)
+        return
+
+    state_data = await state.get_data()
+    qty = int(state_data.get(f"qty_{product_id}", 1) or 1)
+    qty = qty + 1 if is_plus else qty - 1
+    qty = max(1, min(qty, max_quantity))
+    await state.update_data({f"qty_{product_id}": qty})
+
+    unit_price = float(state_data.get("final_price", float(product.price)) or float(product.price))
+    has_promo = bool(state_data.get("applied_promo_code"))
+    rendered = await render_product_detail(
+        session, product_id, callback.from_user.id,
+        quantity=qty, current_price=unit_price, has_promo=has_promo,
+    )
+    if rendered and callback.message:
+        text, kb = rendered
+        try:
+            await callback.message.edit_text(text=text, reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            pass
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("qtyinfo_"))
+async def cb_quantity_info(
+    callback: CallbackQuery, session: AsyncSession, state: FSMContext
+) -> None:
+    """Tombol tengah stepper: tampilkan total harga jumlah saat ini."""
+    product_id = int(callback.data.replace("qtyinfo_", ""))
+    product = await crud.get_product_by_id(session=session, product_id=product_id)
+    if not product:
+        await callback.answer()
+        return
+    state_data = await state.get_data()
+    qty = int(state_data.get(f"qty_{product_id}", 1) or 1)
+    max_quantity = await crud.max_order_quantity(session, product)
+    qty = max(1, min(qty, max(1, max_quantity)))
+    unit_price = float(state_data.get("final_price", float(product.price)) or float(product.price))
+    total = unit_price * qty
+    await callback.answer(
+        f"Jumlah: {qty}x @ Rp {unit_price:,.0f} = Rp {total:,.0f}".replace(",", "."),
+        show_alert=False,
+    )
+
+
+# ==========================================
 # RESTOCK NOTIFIER SUBSCRIPTION
 # ==========================================
 @router.callback_query(F.data.startswith("restock_alert_"))
 async def cb_subscribe_restock(
-    callback: CallbackQuery, session: AsyncSession
+    callback: CallbackQuery, session: AsyncSession, state: FSMContext
 ) -> None:
     product_id = int(callback.data.replace("restock_alert_", ""))
     success, msg = await crud.subscribe_restock_alert(
@@ -218,13 +301,13 @@ async def cb_subscribe_restock(
         product_id=product_id,
         user_id=callback.from_user.id,
     )
-    await _refresh_product_detail_message(callback, session, product_id)
+    await _refresh_product_detail_message(callback, session, product_id, state)
     await callback.answer(msg, show_alert=True)
 
 
 @router.callback_query(F.data.startswith("restock_unalert_"))
 async def cb_unsubscribe_restock(
-    callback: CallbackQuery, session: AsyncSession
+    callback: CallbackQuery, session: AsyncSession, state: FSMContext
 ) -> None:
     product_id = int(callback.data.replace("restock_unalert_", ""))
     success, msg = await crud.unsubscribe_restock_alert(
@@ -232,16 +315,28 @@ async def cb_unsubscribe_restock(
         product_id=product_id,
         user_id=callback.from_user.id,
     )
-    await _refresh_product_detail_message(callback, session, product_id)
+    await _refresh_product_detail_message(callback, session, product_id, state)
     await callback.answer(msg, show_alert=True)
 
 
-async def _refresh_product_detail_message(callback, session, product_id) -> None:
+async def _refresh_product_detail_message(callback, session, product_id, state=None) -> None:
     """Render ulang pesan detail produk (teks + keyboard) setelah tombol
-    pengingat ditekan, supaya tombol langsung berubah (🔔 <-> 🔕)."""
+    pengingat ditekan, supaya tombol langsung berubah (🔔 <-> 🔕).
+    Bila state tersedia, jumlah + promo yang sedang dipilih dipertahankan."""
     if not callback.message:
         return
-    rendered = await render_product_detail(session, product_id, callback.from_user.id)
+    quantity = 1
+    current_price = None
+    has_promo = False
+    if state is not None:
+        state_data = await state.get_data()
+        quantity = int(state_data.get(f"qty_{product_id}", 1) or 1)
+        current_price = state_data.get("final_price")
+        has_promo = bool(state_data.get("applied_promo_code"))
+    rendered = await render_product_detail(
+        session, product_id, callback.from_user.id,
+        quantity=quantity, current_price=current_price, has_promo=has_promo,
+    )
     if not rendered:
         return
     text, kb = rendered
@@ -312,9 +407,21 @@ async def process_promo_input(
     db_user = await crud.get_user_by_id(session=session, user_id=message.from_user.id)
     user_balance = float(db_user.balance or 0.0) if db_user else 0.0
 
+    # Jumlah yang sedang dipilih ikut menentukan total (qty=1: sama seperti lama).
+    max_quantity = await crud.max_order_quantity(session, product)
+    quantity = max(1, min(int(data.get(f"qty_{product_id}", 1) or 1), max(1, max_quantity)))
+
     fmt_orig = f"Rp {product.price:,.0f}".replace(",", ".")
     fmt_disc = f"Rp {discount_amount:,.0f}".replace(",", ".")
     fmt_final = f"Rp {final_price:,.0f}".replace(",", ".")
+    if quantity > 1:
+        fmt_total = f"Rp {final_price * quantity:,.0f}".replace(",", ".")
+        total_line = (
+            f"🏷️ <b>Harga Satuan:</b> <code>{fmt_final}</code>\n"
+            f"💵 <b>Total Pembayaran ({quantity}x):</b> <code>{fmt_total}</code>\n"
+        )
+    else:
+        total_line = f"💵 <b>Total Pembayaran:</b> <code>{fmt_final}</code>\n"
 
     text = (
         f"🎉 <b>KODE PROMO BERHASIL DIGUNAKAN!</b>\n"
@@ -323,7 +430,7 @@ async def process_promo_input(
         f"🏷️ <b>Kode Kupon:</b> <code>{promo.code}</code>\n"
         f"💰 <b>Harga Awal:</b> <s>{fmt_orig}</s>\n"
         f"✂️ <b>Potongan Diskon:</b> -{fmt_disc}\n"
-        f"💵 <b>Total Pembayaran:</b> <code>{fmt_final}</code>\n"
+        f"{total_line}"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"<i>Pilih metode pembayaran di bawah untuk menyelesaikan pesanan:</i>"
     )
@@ -336,6 +443,8 @@ async def process_promo_input(
             user_balance=user_balance,
             current_price=final_price,
             has_promo=True,
+            quantity=quantity,
+            max_quantity=max_quantity,
         ),
         parse_mode="HTML",
     )

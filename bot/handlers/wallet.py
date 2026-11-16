@@ -372,7 +372,36 @@ async def cb_pay_with_balance(
     state_data = await state.get_data()
     promo_code = state_data.get("applied_promo_code")
     discount_amount = state_data.get("applied_discount", 0.0)
-    final_amount = state_data.get("final_price", float(product.price))
+    unit_price = state_data.get("final_price", float(product.price))
+    unit_price = float(unit_price or float(product.price))
+
+    # Jumlah pembelian (1-10) dari stepper detail produk. Validasi ulang
+    # server-side sebelum saldo dipotong.
+    max_quantity = await crud.max_order_quantity(session=session, product=product)
+    quantity = int(state_data.get(f"qty_{product.id}", 1) or 1)
+    if product.product_type == "TEXT_STOCK":
+        available_stock = await crud.count_available_stock(
+            session=session, product_id=product.id
+        )
+        if available_stock < 1:
+            await callback.answer(
+                "Mohon maaf, stok produk ini baru saja habis!",
+                show_alert=True,
+            )
+            return
+        if available_stock < quantity:
+            await callback.answer(
+                f"Stok produk ini tinggal {available_stock}, kurangi jumlah pembelian!",
+                show_alert=True,
+            )
+            return
+    quantity = max(1, min(quantity, max(1, max_quantity)))
+
+    # Total = qty x harga satuan setelah voucher; diskon referral 10%
+    # dihitung dari TOTAL. qty=1 hasilnya identik lama.
+    total_unit_price = unit_price * quantity
+    total_discount = float(discount_amount or 0.0) * quantity
+    total_original = float(product.price) * quantity
 
     db_user = await crud.get_user_by_id(session=session, user_id=user.id)
     current_balance = float(db_user.balance or 0.0) if db_user else 0.0
@@ -380,8 +409,8 @@ async def cb_pay_with_balance(
     # Diskon saldo komisi: 10% dari harga setelah voucher, dibayar dari
     # saldo komisi pembeli (dipotong saat pembayaran berhasil).
     ref_balance = float(db_user.referral_balance or 0.0) if db_user else 0.0
-    referral_discount = crud.compute_referral_discount(ref_balance, final_amount)
-    final_amount = final_amount - referral_discount
+    referral_discount = crud.compute_referral_discount(ref_balance, total_unit_price)
+    final_amount = total_unit_price - referral_discount
 
     # JIKA SALDO KURANG: Tampilkan layar bantuan topup / bayar QRIS
     if current_balance < final_amount:
@@ -392,7 +421,8 @@ async def cb_pay_with_balance(
         text_insufficient = (
             f"⚠️ <b>SALDO BELANJA TIDAK MENCUKUPI</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📦 <b>Produk:</b> {product.name}\n"
+            f"📦 <b>Produk:</b> {product.name}"
+            f"{f' × {quantity}' if quantity > 1 else ''}\n"
             f"💵 <b>Total Tagihan:</b> <code>{fmt_price}</code>\n"
             f"💳 <b>Saldo Anda:</b> <code>{fmt_bal}</code>\n"
             f"🔴 <b>Kekurangan:</b> <code>{fmt_shortage}</code>\n"
@@ -428,12 +458,13 @@ async def cb_pay_with_balance(
         user_id=user.id,
         product_id=product.id,
         amount=final_amount,
-        original_amount=float(product.price),
-        discount_amount=discount_amount,
+        original_amount=total_original,
+        discount_amount=total_discount,
         referral_discount=referral_discount,
         promo_code=promo_code,
         trx_type="PURCHASE",
         payment_method="BALANCE",
+        quantity=quantity,
     )
 
     # Kirim produk instan ke pembeli

@@ -78,13 +78,42 @@ async def cb_create_order(
     state_data = await state.get_data()
     promo_code = state_data.get("applied_promo_code")
     discount_amount = state_data.get("applied_discount", 0.0)
-    final_amount = state_data.get("final_price", float(product.price))
+    unit_price = state_data.get("final_price", float(product.price))
+    unit_price = float(unit_price or float(product.price))
+
+    # Jumlah pembelian (1-10) dari stepper detail produk. Validasi ulang
+    # server-side: jangan percaya angka di callback data.
+    max_quantity = await crud.max_order_quantity(session=session, product=product)
+    quantity = int(state_data.get(f"qty_{product.id}", 1) or 1)
+    if product.product_type == "TEXT_STOCK":
+        available_stock = await crud.count_available_stock(
+            session=session, product_id=product.id
+        )
+        if available_stock < 1:
+            await callback.answer(
+                "Mohon maaf, stok produk ini baru saja habis!",
+                show_alert=True,
+            )
+            return
+        if available_stock < quantity:
+            await callback.answer(
+                f"Stok produk ini tinggal {available_stock}, kurangi jumlah pembelian!",
+                show_alert=True,
+            )
+            return
+    quantity = max(1, min(quantity, max(1, max_quantity)))
+
+    # Total = qty x harga satuan setelah voucher; diskon referral 10%
+    # dihitung dari TOTAL (bukan satuan). qty=1 hasilnya identik lama.
+    total_unit_price = unit_price * quantity
+    total_discount = float(discount_amount or 0.0) * quantity
+    total_original = float(product.price) * quantity
     # Diskon saldo komisi: 10% dari harga setelah voucher, dibayar dari
     # saldo komisi pembeli (dipotong saat pembayaran berhasil).
     db_user = await crud.get_user_by_id(session=session, user_id=user.id)
     ref_balance = float(db_user.referral_balance or 0.0) if db_user else 0.0
-    referral_discount = crud.compute_referral_discount(ref_balance, final_amount)
-    final_amount = final_amount - referral_discount
+    referral_discount = crud.compute_referral_discount(ref_balance, total_unit_price)
+    final_amount = total_unit_price - referral_discount
     await state.clear()
 
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M")
@@ -92,13 +121,14 @@ async def cb_create_order(
 
     # 1. KUNCI STOK SEMENTARA (15 MENIT)
     if product.product_type == "TEXT_STOCK":
-        reserved_item = await crud.reserve_stock_item_atomic(
+        reserved_items = await crud.reserve_stock_items_atomic(
             session=session,
             product_id=product.id,
             transaction_id=invoice_id,
+            quantity=quantity,
             duration_minutes=15,
         )
-        if not reserved_item:
+        if not reserved_items:
             await callback.answer(
                 "Mohon maaf, stok produk ini baru saja habis atau sedang dalam proses pembayaran pembeli lain!",
                 show_alert=True,
@@ -142,13 +172,14 @@ async def cb_create_order(
         user_id=user.id,
         product_id=product.id,
         amount=final_amount,
-        original_amount=float(product.price),
-        discount_amount=discount_amount,
+        original_amount=total_original,
+        discount_amount=total_discount,
         referral_discount=referral_discount,
         promo_code=promo_code,
         qris_string=qris_payload,
         qris_image_url=qris_url,
         gateway_reference=gateway_ref,
+        quantity=quantity,
     )
 
     # Notifikasi realtime ke admin: tiap percobaan checkout dilaporkan
@@ -166,20 +197,27 @@ async def cb_create_order(
             buyer_label=_buyer_label,
             buyer_username=user.username,
             gateway_ok=gateway_ref is not None,
+            quantity=quantity,
         )
     except Exception:
         logger.exception(f"Gagal notifikasi checkout #{invoice_id} ke admin")
 
     formatted_price = f"Rp {final_amount:,.0f}".replace(",", ".")
-    discount_info = f"\n✂️ <b>Diskon Promo ({promo_code}):</b> -Rp {discount_amount:,.0f}".replace(",", ".") if promo_code else ""
+    discount_info = f"\n✂️ <b>Diskon Promo ({promo_code}):</b> -Rp {total_discount:,.0f}".replace(",", ".") if promo_code else ""
     ref_info = f"\n💰 <b>Diskon Saldo Komisi (10%):</b> -Rp {referral_discount:,.0f}".replace(",", ".") if referral_discount > 0 else ""
+    # Baris jumlah hanya bila qty > 1; qty=1 caption identik lama.
+    if quantity > 1:
+        qty_line = f"🔢 <b>Jumlah:</b> {quantity}x @ Rp {unit_price:,.0f}".replace(",", ".")
+        product_line = f"📦 <b>Produk:</b> {product.name} × {quantity}\n{qty_line}\n"
+    else:
+        product_line = f"📦 <b>Produk:</b> {product.name}\n"
 
     caption_text = (
         f"🧾 <b>INVOICE PEMBAYARAN QRIS RESMI</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🆔 <b>No. Invoice:</b> <code>{invoice_id}</code>\n"
-        f"📦 <b>Produk:</b> {product.name}\n"
-        f"💰 <b>Harga Normal:</b> Rp {product.price:,.0f}".replace(",", ".") + f"{discount_info}{ref_info}\n"
+        f"{product_line}"
+        f"💰 <b>Harga Normal:</b> Rp {total_original:,.0f}".replace(",", ".") + f"{discount_info}{ref_info}\n"
         f"💵 <b>Total Tagihan:</b> <code>{formatted_price}</code>\n"
         f"🔒 <b>Stok:</b> <i>Diamankan untuk pesanan ini</i>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
