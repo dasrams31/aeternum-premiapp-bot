@@ -63,7 +63,9 @@ from bot.services.broadcast import (
     digest_kb,
     get_category_name,
     product_buy_kb,
+    send_digest_slides,
 )
+from config import settings
 from database import crud
 from database.connection import async_session
 from database.models import Category, Product
@@ -334,6 +336,15 @@ async def send_daily_ready_digest(bot: Bot, session) -> Tuple[int, int]:
         logger.info("Daily ready digest dilewati: tidak ada produk ready.")
         return 0, 0
     chunks = build_ready_digest_chunks(ready)
+    # Album slide katalog Aeternum (disinkron watcher tiap rebuild) di
+    # depan daftar teks, di semua tujuan digest. Album pertama di-upload
+    # ke channel Peka; file_id-nya dipakai ulang untuk channel Aeternum
+    # + DM supaya tidak upload ulang 6 gambar per penerima. Slide gagal
+    # tidak menggagalkan digest teks.
+    slide_file_ids = await send_digest_slides(bot, settings.PEKA_CHANNEL_ID)
+    await send_digest_slides(
+        bot, settings.AETERNUM_CHANNEL_ID, slide_file_ids
+    )
     # Broadcast rutin: ringkasan dikirim ke channel Peka (komunitas Peka
     # hanya dapat info stok ready) DAN ke channel Aeternum (premich dapat
     # semua broadcast). Grup Peka ikut dapat via discussion yang terhubung.
@@ -343,6 +354,8 @@ async def send_daily_ready_digest(bot: Bot, session) -> Tuple[int, int]:
     sent = 0
     for uid in user_ids:
         ok = True
+        if slide_file_ids:
+            await send_digest_slides(bot, uid, slide_file_ids)
         for i, chunk in enumerate(chunks):
             try:
                 kb = digest_dm_kb() if i == len(chunks) - 1 else None

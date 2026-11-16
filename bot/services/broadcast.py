@@ -44,8 +44,10 @@ from typing import List, Optional, Set, Tuple
 from aiogram import Bot
 from aiogram.types import (
     BufferedInputFile,
+    FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputMediaPhoto,
     Message,
 )
 from sqlalchemy import select
@@ -61,6 +63,14 @@ LAST_GROUP_WELCOME_FILE = (
 )
 LAST_DIGEST_PIN_FILE = (
     Path(__file__).resolve().parent.parent.parent / "last_digest_pin.json"
+)
+# Slide katalog Aeternum (6 PNG) yang disinkron watcher tiap rebuild ke
+# dir tetap ini; digest harian 08:00 melampirkannya sebagai album.
+# Bila dir/file belum ada, digest jalan teks saja seperti sebelumnya.
+DIGEST_SLIDES_DIR = (
+    Path(__file__).resolve().parent.parent.parent
+    / "data"
+    / "aeternum_slides"
 )
 # Serializes welcome delete+send+store so two rapid joins cannot delete
 # each other's message.
@@ -592,6 +602,45 @@ async def pin_digest_message(bot: Bot, chat_id: int, message_id: int) -> None:
             logger.warning(f"Gagal unpin digest lama {prev_id} di {chat_id}: {e}")
     pins[str(chat_id)] = message_id
     _write_last_digest_pins(pins)
+
+
+def get_digest_slide_paths() -> List[Path]:
+    """6 slide katalog Aeternum yang disinkron watcher, atau [] bila belum ada."""
+    paths = [DIGEST_SLIDES_DIR / f"slide-{i}.png" for i in range(1, 7)]
+    return paths if all(p.is_file() for p in paths) else []
+
+
+async def send_digest_slides(
+    bot: Bot, chat_id: int, file_ids: Optional[List[str]] = None
+) -> Optional[List[str]]:
+    """Kirim album 6 slide katalog Aeternum ke satu chat.
+
+    Bila file_ids (6) diberikan, pakai file_id Telegram supaya tidak upload
+    ulang. Kembalikan daftar file_id album yang terkirim, atau None bila
+    tidak ada slide / gagal kirim. Tidak pernah melempar: digest teks
+    tetap jalan bila slide gagal.
+    """
+    if file_ids and len(file_ids) == 6:
+        media = [InputMediaPhoto(media=fid) for fid in file_ids]
+    else:
+        paths = get_digest_slide_paths()
+        if not paths:
+            return None
+        media = [InputMediaPhoto(media=FSInputFile(p)) for p in paths]
+    try:
+        msgs = await bot.send_media_group(chat_id=chat_id, media=media)
+        ids = [m.photo[-1].file_id for m in msgs if m.photo]
+        if len(ids) == 6:
+            logger.info("Slide digest terkirim ke %s (6 foto).", chat_id)
+            return ids
+        logger.warning(
+            "Slide digest ke %s hanya %s/6 foto, file_id tidak dipakai ulang.",
+            chat_id, len(ids),
+        )
+        return None
+    except Exception as e:
+        logger.warning(f"Gagal kirim slide digest ke {chat_id}: {e}")
+        return None
 
 
 async def broadcast_ready_digest_to_channel(bot: Bot, chunks: List[str]) -> int:
