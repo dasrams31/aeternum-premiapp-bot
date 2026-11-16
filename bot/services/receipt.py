@@ -234,9 +234,13 @@ def render_receipt_image(
     invoice = invoice_id or "Manual"
     buyer = buyer_display(buyer_username, buyer_first_name)
     method = format_method(payment_method)
-    # qty=1: "1x @ <total>" identik lama; qty>1: "Nx @ <harga satuan>".
+    # qty=1: "1x @ <total bayar>" identik perilaku lama (termasuk bila ada
+    # voucher/referral); qty>1: "Nx @ <harga satuan setelah voucher>".
     quantity = max(1, int(quantity or 1))
-    qty = f"{quantity}x @ {_rupiah(unit_price if unit_price else amount)}"
+    if quantity > 1 and unit_price:
+        qty = f"{quantity}x @ {_rupiah(unit_price)}"
+    else:
+        qty = f"1x @ {_rupiah(amount)}"
     total = _rupiah(amount)
 
     probe = Image.new("RGB", (10, 10))

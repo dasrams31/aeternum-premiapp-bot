@@ -123,7 +123,11 @@ async def start_auto_payment_poller(bot: Bot, interval_seconds: int = 6) -> None
                                 # Broadcast rutin: transaksi berhasil -> channel Peka
                                 buyer = await crud.get_user_by_id(session=session, user_id=trx.user_id)
                                 _qty = int(getattr(trx, "quantity", 1) or 1)
-                                _unit = float(trx.original_amount or trx.amount) / _qty if _qty > 0 else float(trx.amount)
+                                # Harga satuan setelah voucher (konsisten
+                                # dengan baris Jumlah di caption invoice);
+                                # qty=1 diabaikan receipt (pakai amount).
+                                _orig = float(trx.original_amount or 0) - float(trx.discount_amount or 0)
+                                _unit = _orig / _qty if _qty > 1 and _orig > 0 else float(trx.amount)
                                 _plabel = f"{product.name} × {_qty}" if _qty > 1 else product.name
                                 await broadcast_transaction_success(
                                     bot,
