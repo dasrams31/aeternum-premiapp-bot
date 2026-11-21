@@ -1,7 +1,7 @@
 """
 Aeternum PremiApp Bot - Sambutan user yang bergabung ke grup Peka /
 channel Aeternum, plus auto-accept join requests ke grup Peka, plus
-verifikasi anti-bot ("Saya bukan robot") untuk member baru grup Peka.
+verifikasi anti-bot (soal matematika) untuk member baru grup Peka.
 
 Bot menerima update chat_member karena administrator di ketiga chat.
 Hanya perpindahan left/kicked -> member yang diumumkan, dan hanya untuk
@@ -37,8 +37,8 @@ async def on_chat_member(event: ChatMemberUpdated, bot: Bot) -> None:
         if user.is_bot:
             return
         if event.chat.id == settings.PEKA_GROUP_ID:
-            # Grup Peka: captcha anti-bot dulu (restrict + tombol
-            # "Saya bukan robot"), lalu sambutan lengkap seperti biasa.
+            # Grup Peka: captcha anti-bot dulu (restrict + soal
+            # matematika), lalu sambutan lengkap seperti biasa.
             if user.id != settings.ADMIN_ID:
                 await start_captcha(
                     bot, event.chat.id, user.id, user.first_name or "teman baru"
@@ -94,23 +94,32 @@ async def on_chat_join_request(event: ChatJoinRequest, bot: Bot) -> None:
 
 @router.callback_query(F.data.startswith("captcha:"))
 async def on_captcha_button(callback: CallbackQuery, bot: Bot) -> None:
-    """Tombol "Saya bukan robot" di pesan verifikasi grup Peka."""
+    """Tombol jawaban soal matematika di pesan verifikasi grup Peka."""
     if callback.message is None or callback.message.chat.id != settings.PEKA_GROUP_ID:
         await callback.answer("Tombol ini hanya berlaku di grup Peka.")
         return
+    parts = (callback.data or "").split(":")
     try:
-        target_id = int((callback.data or "").split(":", 1)[1])
+        target_id = int(parts[1])
+        choice = int(parts[2])
     except (ValueError, IndexError):
         await callback.answer("Tombol tidak valid.")
         return
     if callback.from_user.id != target_id:
         await callback.answer("Tombol ini bukan untuk kamu.", show_alert=True)
         return
-    result = await verify_captcha(bot, callback.message.chat.id, target_id)
+    result = await verify_captcha(bot, callback.message.chat.id, target_id, choice)
     if result == "ok":
         await callback.answer("Terverifikasi. Selamat datang di grup Peka!")
     elif result == "already":
         await callback.answer("Kamu sudah terverifikasi.")
+    elif result == "wrong":
+        await callback.answer("Salah, coba soal baru.")
+    elif result == "failed":
+        await callback.answer(
+            "Kesempatan habis. Kamu dibisukan. Keluar lalu masuk lagi untuk coba lagi.",
+            show_alert=True,
+        )
     else:
         await callback.answer(
             "Verifikasi sudah tidak berlaku. Keluar lalu masuk lagi untuk coba ulang.",
