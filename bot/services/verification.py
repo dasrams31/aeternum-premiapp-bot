@@ -187,7 +187,18 @@ async def check_membership(bot: Bot, user_id: int) -> tuple[bool, bool]:
     async def _joined(chat_id: int) -> bool:
         try:
             member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-            return member.status in JOINED_STATUSES
+            if member.status in JOINED_STATUSES:
+                return True
+            # Captcha-verified members keep Telegram status "restricted" with
+            # full permissions (Telegram never flips it back to "member" after
+            # restrict_chat_member re-grants permissions). Count them as
+            # joined; still-muted users (can_send_messages False) must NOT
+            # pass the gate.
+            return (
+                member.status == "restricted"
+                and getattr(member, "is_member", False)
+                and getattr(member, "can_send_messages", False)
+            )
         except Exception as e:
             logger.debug(f"Membership check gagal chat={chat_id} user={user_id}: {e}")
             return False
