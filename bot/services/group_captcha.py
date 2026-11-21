@@ -7,8 +7,9 @@ Alur (perintah user 21 Nov 2026):
 - Klik tombol -> restrict dibuka, pesan verifikasi dihapus, pesan
   "Verifikasi berhasil" dikirim lalu dihapus setelah 5 detik.
 - Pesan verifikasi hilang sendiri dalam 5 menit. Bila sampai 5 menit
-  tidak diklik, pesan dihapus dan user dikeluarkan dari grup (ban +
-  unban, jadi bisa masuk lagi dan coba verifikasi ulang).
+  tidak diklik, pesan dihapus dan user tetap dibisukan selamanya
+  (perintah user 21 Nov 2026: jangan dikeluarkan). Jalan keluarnya:
+  keluar lalu masuk lagi, captcha baru dikirim.
 
 Hanya berlaku di grup Peka. Admin/creator yang bergabung tidak kena
 captcha (status mereka "administrator", bukan "member"). Member lama
@@ -138,21 +139,8 @@ async def _delete_after(bot: Bot, chat_id: int, message_id: int, delay: float) -
     await _delete_message(bot, chat_id, message_id)
 
 
-async def _kick_user(bot: Bot, chat_id: int, user_id: int) -> None:
-    """Keluarkan user tapi tetap boleh gabung lagi (ban + unban)."""
-    try:
-        await bot.ban_chat_member(chat_id=chat_id, user_id=user_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Gagal ban user %s di %s: %s", user_id, chat_id, exc)
-        return
-    try:
-        await bot.unban_chat_member(chat_id=chat_id, user_id=user_id, only_if_banned=True)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Gagal unban user %s di %s: %s", user_id, chat_id, exc)
-
-
 async def _timeout_worker(bot: Bot, chat_id: int, user_id: int) -> None:
-    """Tunggu sampai deadline: hapus pesan verifikasi + keluarkan user."""
+    """Tunggu sampai deadline: hapus pesan verifikasi, user tetap bisu."""
     entry = _PENDING.get((chat_id, user_id))
     if entry is None:
         return
@@ -166,9 +154,8 @@ async def _timeout_worker(bot: Bot, chat_id: int, user_id: int) -> None:
         return
     _save_pending_file()
     await _delete_message(bot, chat_id, entry["message_id"])
-    await _kick_user(bot, chat_id, user_id)
     logger.info(
-        "Captcha timeout: user %s dikeluarkan dari grup %s "
+        "Captcha timeout: user %s tetap dibisukan di grup %s "
         "(tidak verifikasi dalam 5 menit)",
         user_id,
         chat_id,
@@ -199,7 +186,8 @@ async def start_captcha(bot: Bot, chat_id: int, user_id: int, first_name: str) -
         "Sebelum bisa chat di sini, buktikan kamu bukan robot "
         "dengan klik tombol di bawah.\n\n"
         "Pesan ini hilang dalam 5 menit. Kalau tidak klik, kamu "
-        "dikeluarkan dari grup dan bisa masuk lagi untuk coba verifikasi ulang."
+        "dibisukan selamanya. Keluar lalu masuk lagi kalau mau coba "
+        "verifikasi ulang."
     )
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -293,8 +281,9 @@ async def restore_pending_captchas(bot: Bot) -> None:
         except (ValueError, KeyError, TypeError):
             continue
         if deadline <= now:
+            # Sudah lewat deadline saat bot start: hapus pesan saja,
+            # user tetap dibisukan (tidak dikeluarkan).
             await _delete_message(bot, chat_id, message_id)
-            await _kick_user(bot, chat_id, user_id)
             continue
         _PENDING[(chat_id, user_id)] = {
             "message_id": message_id,
