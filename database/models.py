@@ -47,6 +47,10 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Amnesti 21 Nov 2026: user lama dibebaskan dari gate verifikasi
+    # (akses penuh tetap walau keluar dari grup/channel; user baru tetap wajib verif).
+    verification_exempt: Mapped[bool] = mapped_column(Boolean, default=False)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

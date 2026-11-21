@@ -59,6 +59,9 @@ async def ensure_verification_columns() -> None:
         await conn.execute(
             text("ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_last_check_at TIMESTAMPTZ")
         )
+        await conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_exempt BOOLEAN DEFAULT FALSE")
+        )
     logger.info("Kolom verifikasi users dipastikan ada.")
 
 
@@ -213,7 +216,7 @@ async def is_user_verified(session, user_id: int) -> bool:
     if user_id == settings.ADMIN_ID:
         return True
     user = await crud.get_user_by_id(session=session, user_id=user_id)
-    return bool(user and user.is_verified)
+    return bool(user and (user.is_verified or user.verification_exempt))
 
 
 async def mark_verified(session, user_id: int) -> None:
@@ -228,6 +231,8 @@ async def mark_verified(session, user_id: int) -> None:
 async def mark_unverified(session, user_id: int) -> None:
     """Cabut verifikasi user (dipakai saat ketahuan keluar dari salah satu chat)."""
     user = await crud.get_user_by_id(session=session, user_id=user_id)
+    if user and user.verification_exempt:
+        return  # Amnesti 21 Nov 2026: user lama tidak pernah dicabut.
     if user and user.is_verified:
         user.is_verified = False
         user.verified_at = None
@@ -351,7 +356,7 @@ async def _recheck_verified_user(bot: Bot, user_id: int) -> None:
     """
     async with async_session() as session:
         user = await crud.get_user_by_id(session=session, user_id=user_id)
-        if not user or not user.is_verified or user_id == settings.ADMIN_ID:
+        if not user or not user.is_verified or user.verification_exempt or user_id == settings.ADMIN_ID:
             return
         in_group, in_aeternum = await check_membership(bot, user_id)
         user.verify_last_check_at = datetime.now(timezone.utc)
@@ -416,6 +421,7 @@ async def start_verification_checker(bot: Bot, interval_seconds: int | None = No
                     text(
                         "SELECT id FROM users WHERE id != :admin "
                         "AND COALESCE(is_verified, FALSE) = TRUE "
+                        "AND COALESCE(verification_exempt, FALSE) = FALSE "
                         "AND (verify_last_check_at IS NULL "
                         "OR verify_last_check_at < :six_hours_ago) "
                         "ORDER BY verify_last_check_at ASC NULLS FIRST LIMIT 20"
