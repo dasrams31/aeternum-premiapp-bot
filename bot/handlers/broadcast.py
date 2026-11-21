@@ -1,6 +1,7 @@
 """
 Aeternum PremiApp Bot - Sambutan user yang bergabung ke grup Peka /
-channel Aeternum, plus auto-accept join requests ke grup Peka.
+channel Aeternum, plus auto-accept join requests ke grup Peka, plus
+verifikasi anti-bot ("Saya bukan robot") untuk member baru grup Peka.
 
 Bot menerima update chat_member karena administrator di ketiga chat.
 Hanya perpindahan left/kicked -> member yang diumumkan, dan hanya untuk
@@ -11,10 +12,11 @@ jadi permintaan gabung yang masuk langsung disetujui bot.
 
 import logging
 
-from aiogram import Bot, Router
-from aiogram.types import ChatJoinRequest, ChatMemberUpdated
+from aiogram import Bot, F, Router
+from aiogram.types import CallbackQuery, ChatJoinRequest, ChatMemberUpdated
 
 from bot.services.broadcast import broadcast_user_joined, welcome_new_group_member
+from bot.services.group_captcha import cancel_captcha, start_captcha, verify_captcha
 from config import settings
 
 router = Router(name="broadcast_router")
@@ -35,7 +37,12 @@ async def on_chat_member(event: ChatMemberUpdated, bot: Bot) -> None:
         if user.is_bot:
             return
         if event.chat.id == settings.PEKA_GROUP_ID:
-            # Grup Peka: sambutan lengkap (tag nama + username + info singkat Peka).
+            # Grup Peka: captcha anti-bot dulu (restrict + tombol
+            # "Saya bukan robot"), lalu sambutan lengkap seperti biasa.
+            if user.id != settings.ADMIN_ID:
+                await start_captcha(
+                    bot, event.chat.id, user.id, user.first_name or "teman baru"
+                )
             await welcome_new_group_member(
                 bot,
                 event.chat.id,
@@ -49,6 +56,10 @@ async def on_chat_member(event: ChatMemberUpdated, bot: Bot) -> None:
                 bot, event.chat.id, user.first_name or "teman baru"
             )
         # Channel Peka: tanpa sambutan (bersih buat broadcast).
+    elif old == "member" and new in ("left", "kicked"):
+        # Keluar sebelum verifikasi: bersihkan pesan captcha + timeout.
+        if event.chat.id == settings.PEKA_GROUP_ID:
+            await cancel_captcha(bot, event.chat.id, event.new_chat_member.user.id)
 
 
 @router.chat_join_request()
@@ -78,4 +89,30 @@ async def on_chat_join_request(event: ChatJoinRequest, bot: Bot) -> None:
             "Auto-approve join request failed: user_id=%s error=%s",
             user.id,
             exc,
+        )
+
+
+@router.callback_query(F.data.startswith("captcha:"))
+async def on_captcha_button(callback: CallbackQuery, bot: Bot) -> None:
+    """Tombol "Saya bukan robot" di pesan verifikasi grup Peka."""
+    if callback.message is None or callback.message.chat.id != settings.PEKA_GROUP_ID:
+        await callback.answer("Tombol ini hanya berlaku di grup Peka.")
+        return
+    try:
+        target_id = int((callback.data or "").split(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Tombol tidak valid.")
+        return
+    if callback.from_user.id != target_id:
+        await callback.answer("Tombol ini bukan untuk kamu.", show_alert=True)
+        return
+    result = await verify_captcha(bot, callback.message.chat.id, target_id)
+    if result == "ok":
+        await callback.answer("Terverifikasi. Selamat datang di grup Peka!")
+    elif result == "already":
+        await callback.answer("Kamu sudah terverifikasi.")
+    else:
+        await callback.answer(
+            "Verifikasi sudah tidak berlaku. Keluar lalu masuk lagi untuk coba ulang.",
+            show_alert=True,
         )

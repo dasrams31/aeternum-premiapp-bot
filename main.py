@@ -25,6 +25,7 @@ from bot.services.subscription import start_subscription_reminder_task
 from bot.handlers import broadcast as broadcast_handlers
 from bot.handlers import verification as verification_handlers
 from bot.middlewares.verification import VerificationMiddleware
+from bot.services.group_captcha import restore_pending_captchas
 from bot.services.stock_updater import start_daily_stock_updater
 from bot.services.verification import start_verification_checker
 from bot.handlers import (
@@ -134,6 +135,9 @@ async def main() -> None:
     logger.info(f"FastAPI Webhook berjalan di port {settings.PORT}")
     logger.info("Bot Telegram mulai mendengarkan event polling...")
     logger.info("Auto-Payment Poller aktif berjalan di background.")
+
+    # Pulihkan timeout captcha grup yang tertunda sebelum restart.
+    await restore_pending_captchas(bot)
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
