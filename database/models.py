@@ -51,6 +51,12 @@ class User(Base):
     # (akses penuh tetap walau keluar dari grup/channel; user baru tetap wajib verif).
     verification_exempt: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Invite realtime amnesti: terakhir kali dicek/dikirim ajakan gabung
+    # channel + grup (throttle 7 hari, lihat maybe_send_join_invite).
+    invite_last_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

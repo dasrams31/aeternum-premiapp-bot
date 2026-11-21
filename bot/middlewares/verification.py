@@ -13,6 +13,7 @@ Prompt verifikasi dikirim maks 1x per 5 menit per user supaya tidak spam
 saat user menekan tombol berkali-kali.
 """
 
+import asyncio
 import time
 from typing import Any, Awaitable, Callable, Dict
 
@@ -20,7 +21,11 @@ from aiogram import BaseMiddleware, Bot
 from aiogram.types import CallbackQuery, Message, TelegramObject
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.services.verification import is_user_verified, send_verification_prompt
+from bot.services.verification import (
+    is_user_verified,
+    maybe_send_join_invite,
+    send_verification_prompt,
+)
 from config import settings
 from database import crud
 
@@ -66,6 +71,9 @@ class VerificationMiddleware(BaseMiddleware):
             )
             db_user = await crud.get_user_by_id(session=session, user_id=user.id)
         if db_user and db_user.is_verified:
+            if db_user.verification_exempt:
+                # Amnesti realtime: ingatkan gabung channel/grup saat user aktif.
+                asyncio.create_task(maybe_send_join_invite(self.bot, user.id))
             return await handler(event, data)
 
         # Belum terverifikasi: tampilkan prompt (dibatasi cooldown) lalu blokir.

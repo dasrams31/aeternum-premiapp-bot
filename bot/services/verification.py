@@ -62,6 +62,9 @@ async def ensure_verification_columns() -> None:
         await conn.execute(
             text("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_exempt BOOLEAN DEFAULT FALSE")
         )
+        await conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_last_checked_at TIMESTAMPTZ")
+        )
     logger.info("Kolom verifikasi users dipastikan ada.")
 
 
@@ -238,6 +241,73 @@ async def mark_unverified(session, user_id: int) -> None:
         user.verified_at = None
         await session.commit()
         logger.info(f"User {user_id} dicabut verifikasinya (keluar dari salah satu chat).")
+
+
+INVITE_COOLDOWN_DAYS = 7
+
+JOIN_INVITE_TEXT = (
+    "👋 <b>GABUNG CHANNEL &amp; GRUP PEKA</b>\n"
+    "━━━━━━━━━━━━━━━━━━━━━\n"
+    "Akses bot kamu sudah aktif. Biar tidak ketinggalan info produk baru, "
+    "restock, dan promo, yuk gabung:\n\n"
+    "📢 <b>Channel Aeternum</b> — info produk &amp; promo\n"
+    "👥 <b>Grup Peka</b> — komunitas &amp; tanya jawab\n\n"
+    "Tinggal ketuk tombol di bawah untuk gabung."
+)
+
+
+def join_invite_keyboard() -> InlineKeyboardMarkup:
+    """Tombol gabung grup/channel (tanpa tombol cek verifikasi)."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="👥 Gabung Grup Peka",
+            url=f"https://t.me/{settings.PEKA_GROUP_USERNAME.lstrip('@')}",
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="📣 Gabung Channel Aeternum",
+            url=f"https://t.me/{settings.AETERNUM_CHANNEL_USERNAME.lstrip('@')}",
+        )
+    )
+    return builder.as_markup()
+
+
+async def maybe_send_join_invite(bot: Bot, user_id: int) -> bool:
+    """Invite realtime untuk user amnesti (verification_exempt).
+
+    Dipanggil setiap kali user exempt memakai bot. Bila ia masih belum
+    gabung channel dan/atau grup, kirim DM ajakan gabung — maks 1x per
+    7 hari per user. Tidak pernah raise (middleware tidak boleh mati).
+    """
+    try:
+        async with async_session() as session:
+            user = await crud.get_user_by_id(session=session, user_id=user_id)
+            if not user or not user.verification_exempt:
+                return False
+            now = datetime.now(timezone.utc)
+            last = user.invite_last_checked_at
+            if last and (now - last) < timedelta(days=INVITE_COOLDOWN_DAYS):
+                return False
+            in_group, in_aeternum = await check_membership(bot, user_id)
+            if in_group and in_aeternum:
+                user.invite_last_checked_at = now
+                await session.commit()
+                return False
+            await bot.send_message(
+                chat_id=user_id,
+                text=JOIN_INVITE_TEXT,
+                parse_mode="HTML",
+                reply_markup=join_invite_keyboard(),
+            )
+            user.invite_last_checked_at = now
+            await session.commit()
+            logger.info(f"Join invite realtime dikirim ke user {user_id}.")
+            return True
+    except Exception:
+        logger.exception(f"Gagal kirim join invite realtime ke user {user_id}.")
+        return False
 
 
 def verification_keyboard() -> InlineKeyboardMarkup:

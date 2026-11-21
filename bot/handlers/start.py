@@ -2,6 +2,9 @@
 Aeternum PremiApp Bot - Start & General Handlers
 """
 
+import asyncio
+import time
+from collections import deque
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.types import CallbackQuery, Message
@@ -10,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.services.verification import (
     check_membership,
     mark_verified,
+    maybe_send_join_invite,
     verification_keyboard,
     verification_text,
 )
@@ -29,12 +33,28 @@ from bot.keyboards.user_kb import (
 
 router = Router(name="start_router")
 
+_START_HITS = {}  # user_id -> deque[float] of recent /start timestamps
+
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, session: AsyncSession, bot: Bot) -> None:
     user = message.from_user
     if not user:
         return
+
+    # Ignore /start from @fyiid2025 (ardi) - user order 17 Nov 2026: do not reply.
+    if user.id == 6240817085:
+        return
+
+    # /start burst limiter: max 3 replies per user per 60s; extra taps dropped silently.
+    if user.id != settings.ADMIN_ID:
+        _now = time.monotonic()
+        _hits = _START_HITS.setdefault(user.id, deque())
+        while _hits and _hits[0] <= _now - 60.0:
+            _hits.popleft()
+        if len(_hits) >= 3:
+            return
+        _hits.append(_now)
 
     referrer_id = None
     args = message.text.split()
@@ -81,6 +101,11 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot) -> None:
                 parse_mode="HTML",
             )
             return
+
+    # Amnesti realtime: user exempt yang belum gabung channel/grup diingatkan
+    # saat mereka /start (maks 1x per 7 hari).
+    if db_user.verification_exempt:
+        asyncio.create_task(maybe_send_join_invite(bot, user.id))
 
     # Deep-link dari broadcast: /start product_<id> (tombol Beli Sekarang)
     # atau /start remind_<id> (tombol pengingat di broadcast stok habis).
