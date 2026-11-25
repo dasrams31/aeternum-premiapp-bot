@@ -21,6 +21,16 @@ from bot.keyboards.user_kb import (
 router = Router(name="catalog_router")
 
 
+def _is_group_chat(message) -> bool:
+    """True bila pesan berasal dari grup/supergrup (bukan DM bot).
+
+    Dipakai guard checkout-ke-DM (aturan terkunci 25 Nov 2026): detail
+    produk boleh dibuka di grup, tapi tombol bayar di sana harus berupa
+    deep-link ke DM, bukan callback yang menerbitkan invoice di grup.
+    """
+    return bool(message) and message.chat.type in ("group", "supergroup")
+
+
 class ApplyPromoState(StatesGroup):
     waiting_for_code = State()
 
@@ -117,6 +127,7 @@ async def cb_show_category_products(
 async def render_product_detail(
     session, product_id, user_id, quantity: int = 1,
     current_price: float | None = None, has_promo: bool = False,
+    in_group: bool = False,
 ):
     """Bangun (teks, keyboard) detail produk.
 
@@ -124,6 +135,8 @@ async def render_product_detail(
     /start remind_<id> supaya tampilannya selalu sama.
     quantity: jumlah pembelian yang sedang dipilih (1-10, default 1 =
     tampilan lama). current_price: harga satuan setelah promo bila ada.
+    in_group: True bila detail dibuka di grup; tombol bayar diganti
+    deep-link checkout ke DM bot (invoice tidak pernah terbit di grup).
     """
     product = await crud.get_product_by_id(session=session, product_id=product_id)
     if not product:
@@ -199,6 +212,7 @@ async def render_product_detail(
         is_subscribed=is_subscribed,
         quantity=quantity,
         max_quantity=max_quantity,
+        in_group=in_group,
     )
     return text, kb
 
@@ -210,7 +224,9 @@ async def cb_show_product_detail(
     await state.clear()
     user = callback.from_user
     product_id = int(callback.data.split("_")[1])
-    rendered = await render_product_detail(session, product_id, user.id)
+    rendered = await render_product_detail(
+        session, product_id, user.id, in_group=_is_group_chat(callback.message)
+    )
     if not rendered:
         await callback.answer("Produk tidak ditemukan!", show_alert=True)
         return
@@ -256,6 +272,7 @@ async def cb_change_quantity(
     rendered = await render_product_detail(
         session, product_id, callback.from_user.id,
         quantity=qty, current_price=unit_price, has_promo=has_promo,
+        in_group=_is_group_chat(callback.message),
     )
     if rendered and callback.message:
         text, kb = rendered
@@ -336,6 +353,7 @@ async def _refresh_product_detail_message(callback, session, product_id, state=N
     rendered = await render_product_detail(
         session, product_id, callback.from_user.id,
         quantity=quantity, current_price=current_price, has_promo=has_promo,
+        in_group=_is_group_chat(callback.message),
     )
     if not rendered:
         return
@@ -445,6 +463,7 @@ async def process_promo_input(
             has_promo=True,
             quantity=quantity,
             max_quantity=max_quantity,
+            in_group=_is_group_chat(message),
         ),
         parse_mode="HTML",
     )

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import crud
 from bot.keyboards.user_kb import NAV_HISTORY, back_to_main_kb, history_detail_kb, history_list_kb
+from bot.services.group_guard import deny_group_private
 
 router = Router(name="history_router")
 
@@ -19,6 +20,8 @@ router = Router(name="history_router")
 async def show_user_history(
     event: Message | CallbackQuery, session: AsyncSession
 ) -> None:
+    if await deny_group_private(event):
+        return
     user = event.from_user
     if not user:
         return
@@ -72,6 +75,10 @@ async def show_user_history(
 async def cb_view_history_detail(
     callback: CallbackQuery, session: AsyncSession
 ) -> None:
+    # Detail riwayat memuat isi akun yang sudah dibeli: JANGAN PERNAH
+    # tampil di grup. Guard ini yang menahannya.
+    if await deny_group_private(callback):
+        return
     invoice_id = callback.data.replace("view_hist_", "")
     trx = await crud.get_transaction_by_id(session=session, transaction_id=invoice_id)
 

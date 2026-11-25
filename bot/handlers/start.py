@@ -10,6 +10,7 @@ from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.services.group_guard import deny_group_private
 from bot.services.verification import (
     check_membership,
     mark_verified,
@@ -203,6 +204,8 @@ async def cb_back_to_main(callback: CallbackQuery, session: AsyncSession) -> Non
 async def cb_show_referral(
     event: Message | CallbackQuery, session: AsyncSession, bot: Bot
 ) -> None:
+    if await deny_group_private(event):
+        return
     user = event.from_user
     db_user = await crud.get_user_by_id(session=session, user_id=user.id)
     if not db_user:
@@ -249,6 +252,8 @@ async def cb_show_referral(
 async def cb_withdraw_referral(callback: CallbackQuery, session: AsyncSession) -> None:
     """Penarikan tunai saldo komisi sudah tidak tersedia (aturan baru):
     saldo komisi hanya dipakai sebagai diskon 10% di tiap pembelian."""
+    if await deny_group_private(callback):
+        return
     user = callback.from_user
     db_user = await crud.get_user_by_id(session=session, user_id=user.id)
     balance = float(db_user.referral_balance or 0.0) if db_user else 0.0

@@ -27,6 +27,7 @@ from bot.keyboards.user_kb import (
 )
 from bot.services.broadcast import notify_admin_checkout_attempt
 from bot.services.fulfillment import deliver_purchased_product
+from bot.services.group_guard import deny_group_private
 from bot.services.qris import (
     find_available_unique_amount,
     generate_qr_input_file,
@@ -63,7 +64,7 @@ def get_qr_buffered_file(
             return generate_qr_input_file(qris_string, filename=filename)
 
     payload = fallback_payload or make_dynamic_qris(amount=int(fallback_amount))
-    return generate_qr_input_file(payload, filename=filename)
+    return generate_qr_input_file(payload, filename=filename, amount=int(fallback_amount))
 
 
 def generate_qr_image(payload: str) -> BufferedInputFile:
@@ -73,6 +74,8 @@ def generate_qr_image(payload: str) -> BufferedInputFile:
 
 @router.callback_query(F.data == "user_wallet")
 async def cb_show_wallet(callback: CallbackQuery, session: AsyncSession) -> None:
+    if await deny_group_private(callback):
+        return
     user = callback.from_user
     db_user = await crud.get_user_by_id(session=session, user_id=user.id)
     balance = float(db_user.balance or 0.0) if db_user else 0.0
@@ -103,6 +106,8 @@ async def cb_show_wallet(callback: CallbackQuery, session: AsyncSession) -> None
 @router.message(StateFilter(None), F.text == NAV_DEPOSIT)
 @router.callback_query(F.data == "wallet_topup")
 async def cb_prompt_topup(event: Message | CallbackQuery) -> None:
+    if await deny_group_private(event):
+        return
     text = (
         "➕ <b>TOP UP SALDO VIA QRIS</b>\n\n"
         "Silakan pilih nominal saldo yang ingin Anda isi:"
@@ -124,12 +129,16 @@ async def cb_prompt_topup(event: Message | CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("topup_nom_"))
 async def cb_topup_preset(callback: CallbackQuery, session: AsyncSession) -> None:
+    if await deny_group_private(callback):
+        return
     amount = float(callback.data.replace("topup_nom_", ""))
     await create_topup_invoice(callback=callback, session=session, amount=amount)
 
 
 @router.callback_query(F.data == "topup_custom")
 async def cb_topup_custom(callback: CallbackQuery, state: FSMContext) -> None:
+    if await deny_group_private(callback):
+        return
     await state.set_state(TopUpState.waiting_for_custom_amount)
     text = (
         "✏️ <b>NOMINAL TOP UP KUSTOM</b>\n\n"
@@ -358,6 +367,17 @@ async def cb_pay_with_balance(
 ) -> None:
     user = callback.from_user
     product_id = int(callback.data.replace("pay_balance_", ""))
+
+    # Guard checkout-ke-DM (aturan terkunci 25 Nov 2026): bayar pakai saldo
+    # juga HANYA di DM bot, sama seperti Beli via QRIS. Keyboard lama di
+    # grup ditolak di sini supaya transaksi tidak pernah dibuat dari grup.
+    if callback.message and callback.message.chat.type in ("group", "supergroup"):
+        await callback.answer(
+            "Checkout hanya bisa lewat DM bot. Ketuk tombol Checkout di DM Bot untuk lanjut.",
+            show_alert=True,
+        )
+        return
+
     product = await crud.get_product_by_id(session=session, product_id=product_id)
 
     if not product or not product.is_active:

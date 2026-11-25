@@ -15,6 +15,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from config import settings
 from database.models import Category, Product, Transaction
 
+# Deep-link checkout ke DM bot. Cerminan BOT_DEEP_LINK_BASE di
+# bot/services/broadcast.py (username bot tidak pernah berubah).
+# Dipakai saat detail produk dibuka di grup: tombol bayar di grup HARUS
+# berupa URL ke DM, bukan callback, supaya invoice tidak pernah terbit
+# di grup. Aturan terkunci 25 Nov 2026 (perintah user).
+BOT_DEEP_LINK_BASE = "https://t.me/aeternum_premibot"
+
 
 # Label tombol keyboard navigasi persisten (ReplyKeyboardMarkup).
 # Satu sumber kebenaran: dipakai main_reply_kb() dan filter F.text handler.
@@ -195,6 +202,7 @@ def product_detail_kb(
     is_subscribed: bool = False,
     quantity: int = 1,
     max_quantity: int = 10,
+    in_group: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     price_to_pay = current_price or float(product.price)
@@ -213,23 +221,35 @@ def product_detail_kb(
             ),
             InlineKeyboardButton(text="➕", callback_data=f"qtyplus_{product.id}"),
         )
-        fmt_bal = f"Rp {user_balance:,.0f}".replace(",", ".")
-        builder.row(
-            InlineKeyboardButton(
-                text=f"💳 Bayar Pakai Saldo (Saldo: {fmt_bal})",
-                callback_data=f"pay_balance_{product.id}"
+        if in_group:
+            # Di grup: checkout HARUS pindah ke DM bot. Satu tombol URL
+            # deep-link (pola sama seperti tombol Beli di broadcast) yang
+            # membuka detail produk di DM; invoice tidak pernah terbit
+            # di grup. Lihat-lihat produk di grup tetap jalan seperti biasa.
+            builder.row(
+                InlineKeyboardButton(
+                    text="🛒 Checkout di DM Bot",
+                    url=f"{BOT_DEEP_LINK_BASE}?start=product_{product.id}",
+                )
             )
-        )
-        if quantity > 1:
-            buy_text = f"⚡ Beli {quantity}x — {fmt_total}"
         else:
-            buy_text = "⚡ Beli Sekarang via QRIS"
-        builder.row(
-            InlineKeyboardButton(
-                text=buy_text,
-                callback_data=f"buy_{product.id}"
+            fmt_bal = f"Rp {user_balance:,.0f}".replace(",", ".")
+            builder.row(
+                InlineKeyboardButton(
+                    text=f"💳 Bayar Pakai Saldo (Saldo: {fmt_bal})",
+                    callback_data=f"pay_balance_{product.id}"
+                )
             )
-        )
+            if quantity > 1:
+                buy_text = f"⚡ Beli {quantity}x — {fmt_total}"
+            else:
+                buy_text = "⚡ Beli Sekarang via QRIS"
+            builder.row(
+                InlineKeyboardButton(
+                    text=buy_text,
+                    callback_data=f"buy_{product.id}"
+                )
+            )
         if not has_promo:
             builder.row(
                 InlineKeyboardButton(

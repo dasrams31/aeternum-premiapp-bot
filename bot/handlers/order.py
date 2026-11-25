@@ -56,7 +56,7 @@ def get_qr_buffered_file(
             return generate_qr_input_file(qris_string, filename=filename)
 
     payload = fallback_payload or make_dynamic_qris(amount=int(fallback_amount))
-    return generate_qr_input_file(payload, filename=filename)
+    return generate_qr_input_file(payload, filename=filename, amount=int(fallback_amount))
 
 
 @router.callback_query(F.data.startswith("buy_"))
@@ -65,6 +65,17 @@ async def cb_create_order(
 ) -> None:
     user = callback.from_user
     product_id = int(callback.data.split("_")[1])
+
+    # Guard checkout-ke-DM (aturan terkunci 25 Nov 2026): checkout HANYA
+    # di DM bot. Keyboard lama yang masih menampilkan tombol Beli callback
+    # di grup ditolak di sini supaya invoice tidak pernah terbit di grup.
+    if callback.message and callback.message.chat.type in ("group", "supergroup"):
+        await callback.answer(
+            "Checkout hanya bisa lewat DM bot. Ketuk tombol Checkout di DM Bot untuk lanjut.",
+            show_alert=True,
+        )
+        return
+
     product = await crud.get_product_by_id(session=session, product_id=product_id)
 
     if not product or not product.is_active:
