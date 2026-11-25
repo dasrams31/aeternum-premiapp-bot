@@ -57,6 +57,12 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Deep-link tertunda (25 Nov 2026): /start product_<id>/remind_<id> yang
+    # kena gate verifikasi. Disimpan saat gate menolak, dipakai sekali saat
+    # user lolos verifikasi (tombol Cek Sekarang atau /start berikutnya),
+    # lalu dikosongkan.
+    pending_deep_link: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

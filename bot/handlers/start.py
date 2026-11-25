@@ -13,8 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.services.group_guard import deny_group_private
 from bot.services.verification import (
     check_membership,
+    consume_pending_deep_link,
     mark_verified,
     maybe_send_join_invite,
+    save_pending_deep_link,
     verification_keyboard,
     verification_text,
 )
@@ -96,6 +98,12 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot) -> None:
         if in_group and in_aeternum:
             await mark_verified(session, user.id)
         else:
+            # Deep-link checkout yang kena gate disimpan sementara supaya
+            # detail produk langsung kebuka sesudah user lolos verifikasi.
+            if len(args) > 1 and (
+                args[1].startswith("product_") or args[1].startswith("remind_")
+            ):
+                await save_pending_deep_link(session, user.id, args[1])
             await message.answer(
                 text=verification_text(not in_group, not in_aeternum),
                 reply_markup=verification_keyboard(),
@@ -111,44 +119,52 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot) -> None:
     # Deep-link dari broadcast: /start product_<id> (tombol Beli Sekarang)
     # atau /start remind_<id> (tombol pengingat di broadcast stok habis).
     # ref_<id> tetap ditangani seperti sebelumnya di atas.
+    # Bila tidak ada argumen segar, pakai deep-link tertunda dari gate
+    # verifikasi (sekali pakai; argumen lain seperti ref_ tidak menyentuhnya).
+    deep_arg = None
     if len(args) > 1:
-        arg = args[1]
-        if arg.startswith("product_") or arg.startswith("remind_"):
-            try:
-                deep_pid = int(arg.split("_", 1)[1])
-            except (ValueError, IndexError):
-                deep_pid = None
-            if deep_pid:
-                if arg.startswith("remind_"):
-                    product = await crud.get_product_by_id(
-                        session=session, product_id=deep_pid
+        if args[1].startswith("product_") or args[1].startswith("remind_"):
+            deep_arg = args[1]
+            await consume_pending_deep_link(session, user.id)
+    elif len(args) == 1:
+        deep_arg = await consume_pending_deep_link(session, user.id)
+    if deep_arg:
+        arg = deep_arg
+        try:
+            deep_pid = int(arg.split("_", 1)[1])
+        except (ValueError, IndexError):
+            deep_pid = None
+        if deep_pid:
+            if arg.startswith("remind_"):
+                product = await crud.get_product_by_id(
+                    session=session, product_id=deep_pid
+                )
+                if product:
+                    _ok, sub_msg = await crud.subscribe_restock_alert(
+                        session=session, product_id=deep_pid, user_id=user.id
                     )
-                    if product:
-                        _ok, sub_msg = await crud.subscribe_restock_alert(
-                            session=session, product_id=deep_pid, user_id=user.id
-                        )
-                        rendered = await render_product_detail(session, deep_pid, user.id)
-                        if rendered:
-                            dtext, dkb = rendered
-                            await message.answer(
-                                text=f"{sub_msg}\n\n{dtext}",
-                                reply_markup=dkb,
-                                parse_mode="HTML",
-                            )
-                            return
-                else:
                     rendered = await render_product_detail(session, deep_pid, user.id)
                     if rendered:
                         dtext, dkb = rendered
                         await message.answer(
-                            text=dtext, reply_markup=dkb, parse_mode="HTML"
+                            text=f"{sub_msg}\n\n{dtext}",
+                            reply_markup=dkb,
+                            parse_mode="HTML",
                         )
                         return
-                await message.answer(
-                    "Produk tidak ditemukan.",
-                    reply_markup=main_menu_kb(is_admin=is_admin),
-                )
-                return
+            else:
+                rendered = await render_product_detail(session, deep_pid, user.id)
+                if rendered:
+                    dtext, dkb = rendered
+                    await message.answer(
+                        text=dtext, reply_markup=dkb, parse_mode="HTML"
+                    )
+                    return
+            await message.answer(
+                "Produk tidak ditemukan.",
+                reply_markup=main_menu_kb(is_admin=is_admin),
+            )
+            return
 
     welcome_text = (
         f"👋 Halo <b>{user.first_name}</b>, selamat datang di\n"

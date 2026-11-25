@@ -65,6 +65,9 @@ async def ensure_verification_columns() -> None:
         await conn.execute(
             text("ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_last_checked_at TIMESTAMPTZ")
         )
+        await conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS pending_deep_link VARCHAR(50)")
+        )
     logger.info("Kolom verifikasi users dipastikan ada.")
 
 
@@ -229,6 +232,36 @@ async def mark_verified(session, user_id: int) -> None:
         user.verified_at = datetime.now(timezone.utc)
         await session.commit()
         logger.info(f"User {user_id} terverifikasi gabung 2 chat (Grup Peka + Aeternum).")
+
+
+async def save_pending_deep_link(session, user_id: int, arg: str) -> None:
+    """Simpan deep-link product_/remind_ yang tertahan gate verifikasi.
+
+    Dipakai sekali saat user lolos verifikasi (tombol Cek Sekarang atau
+    /start berikutnya); argumen segar menimpa nilai lama.
+    """
+    await session.execute(
+        text("UPDATE users SET pending_deep_link = :arg WHERE id = :uid"),
+        {"arg": arg, "uid": user_id},
+    )
+    await session.commit()
+
+
+async def consume_pending_deep_link(session, user_id: int) -> str | None:
+    """Ambil + kosongkan deep-link tertunda (sekali pakai)."""
+    row = (
+        await session.execute(
+            text("SELECT pending_deep_link FROM users WHERE id = :uid"),
+            {"uid": user_id},
+        )
+    ).scalar()
+    if row:
+        await session.execute(
+            text("UPDATE users SET pending_deep_link = NULL WHERE id = :uid"),
+            {"uid": user_id},
+        )
+        await session.commit()
+    return row
 
 
 async def mark_unverified(session, user_id: int) -> None:
