@@ -304,8 +304,8 @@ async def cb_how_to_buy(event: Message | CallbackQuery) -> None:
         "   • <b>⚡ Beli Sekarang via QRIS:</b> Scan kode QR via BCA, DANA, GoPay, OVO, dll.\n"
         "5. Setelah pembayaran berhasil, bot akan <b>langsung mengirimkan kredensial akun / file</b> ke chat ini secara otomatis!\n\n"
         "🛡️ <b>KETENTUAN GARANSI & KENDALA:</b>\n"
-        "• Seluruh akun dilindungi garansi resmi sesuai durasi paket.\n"
-        "• Jika ada kendala, Anda dapat mengajukan klaim di menu <b>📜 Riwayat Pesanan</b> atau langsung hubungi <b>Admin Utama @dasrams</b>.\n"
+        "• Garansi berbeda tiap produk: ada yang bergaransi, ada yang tanpa garansi. Cek keterangan garansi di deskripsi tiap produk sebelum membeli.\n"
+        "• Jika ada kendala pada produk bergaransi, ajukan klaim di menu <b>📜 Riwayat Pesanan</b> atau langsung hubungi <b>Admin Utama @dasrams</b>.\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         "⚡ <i>Sistem otomatis 24 Jam didukung penuh oleh @dasrams.</i>"
     )
