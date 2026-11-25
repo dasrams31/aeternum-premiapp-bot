@@ -47,7 +47,6 @@ from aiogram.types import (
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    InputMediaPhoto,
     Message,
 )
 from sqlalchemy import select
@@ -507,6 +506,17 @@ async def send_to_group(bot: Bot, text: str, **kwargs) -> bool:
         return False
 
 
+async def send_to_group_msg(bot: Bot, text: str, **kwargs) -> Optional[Message]:
+    """Kirim satu pesan ke grup Peka, kembalikan Message (None bila gagal)."""
+    try:
+        return await bot.send_message(
+            chat_id=settings.PEKA_GROUP_ID, text=text, parse_mode="HTML", **kwargs
+        )
+    except Exception as e:
+        logger.warning(f"Gagal kirim ke grup Peka: {e}")
+        return None
+
+
 async def send_to_admin_dm(bot: Bot, text: str, **kwargs) -> bool:
     """Kirim satu pesan ke DM admin. Kembalikan True bila terkirim."""
     try:
@@ -605,41 +615,43 @@ async def pin_digest_message(bot: Bot, chat_id: int, message_id: int) -> None:
 
 
 def get_digest_slide_paths() -> List[Path]:
-    """6 slide katalog Aeternum yang disinkron watcher, atau [] bila belum ada."""
-    paths = [DIGEST_SLIDES_DIR / f"slide-{i}.png" for i in range(1, 7)]
-    return paths if all(p.is_file() for p in paths) else []
+    """Sampul katalog Aeternum (slide-1) yang disinkron watcher, atau [] bila belum ada.
+
+    Perintah user 19 Nov 2026: digest cukup 1 foto (sampul), jangan spam 6 slide.
+    """
+    p = DIGEST_SLIDES_DIR / "slide-1.png"
+    return [p] if p.is_file() else []
 
 
 async def send_digest_slides(
     bot: Bot, chat_id: int, file_ids: Optional[List[str]] = None
 ) -> Optional[List[str]]:
-    """Kirim album 6 slide katalog Aeternum ke satu chat.
+    """Kirim 1 foto sampul katalog Aeternum ke satu chat.
 
-    Bila file_ids (6) diberikan, pakai file_id Telegram supaya tidak upload
-    ulang. Kembalikan daftar file_id album yang terkirim, atau None bila
+    Bila file_ids (1) diberikan, pakai file_id Telegram supaya tidak upload
+    ulang. Kembalikan daftar file_id (1) yang terkirim, atau None bila
     tidak ada slide / gagal kirim. Tidak pernah melempar: digest teks
     tetap jalan bila slide gagal.
     """
-    if file_ids and len(file_ids) == 6:
-        media = [InputMediaPhoto(media=fid) for fid in file_ids]
+    if file_ids and len(file_ids) == 1:
+        photo = file_ids[0]
     else:
         paths = get_digest_slide_paths()
         if not paths:
             return None
-        media = [InputMediaPhoto(media=FSInputFile(p)) for p in paths]
+        photo = FSInputFile(paths[0])
     try:
-        msgs = await bot.send_media_group(chat_id=chat_id, media=media)
-        ids = [m.photo[-1].file_id for m in msgs if m.photo]
-        if len(ids) == 6:
-            logger.info("Slide digest terkirim ke %s (6 foto).", chat_id)
-            return ids
+        msg = await bot.send_photo(chat_id=chat_id, photo=photo)
+        if msg.photo:
+            logger.info("Sampul digest terkirim ke %s (1 foto).", chat_id)
+            return [msg.photo[-1].file_id]
         logger.warning(
-            "Slide digest ke %s hanya %s/6 foto, file_id tidak dipakai ulang.",
-            chat_id, len(ids),
+            "Sampul digest ke %s tanpa foto, file_id tidak dipakai ulang.",
+            chat_id,
         )
         return None
     except Exception as e:
-        logger.warning(f"Gagal kirim slide digest ke {chat_id}: {e}")
+        logger.warning(f"Gagal kirim sampul digest ke {chat_id}: {e}")
         return None
 
 
@@ -662,6 +674,27 @@ async def broadcast_ready_digest_to_channel(bot: Bot, chunks: List[str]) -> int:
         logger.info("Ready digest terkirim ke channel Peka (%s pesan).", sent)
     if first_id:
         await pin_digest_message(bot, settings.PEKA_CHANNEL_ID, first_id)
+    return sent
+
+
+async def broadcast_ready_digest_to_group(bot: Bot, chunks: List[str]) -> int:
+    """Kirim ringkasan stok ready harian ke grup Peka. Kembalikan jumlah pesan terkirim."""
+    sent = 0
+    first_id = None
+    for i, chunk in enumerate(chunks):
+        kb = digest_kb() if i == len(chunks) - 1 else None
+        if i == 0:
+            msg = await send_to_group_msg(bot, chunk, reply_markup=kb)
+            if msg:
+                first_id = msg.message_id
+                sent += 1
+        elif await send_to_group(bot, chunk, reply_markup=kb):
+            sent += 1
+        await asyncio.sleep(0.3)
+    if sent:
+        logger.info("Ready digest terkirim ke grup Peka (%s pesan).", sent)
+    if first_id:
+        await pin_digest_message(bot, settings.PEKA_GROUP_ID, first_id)
     return sent
 
 
@@ -755,13 +788,23 @@ async def broadcast_transaction_success(
 
 async def broadcast_stock_out(bot: Bot, session, product: Product) -> bool:
     """Produk TEXT_STOCK kehabisan stok -> channel Aeternum + grup Peka +
-    DM admin, dengan tombol pengingat restock (deep-link /start remind_<id>)."""
+    DM admin + DM semua user, dengan tombol pengingat restock
+    (deep-link /start remind_<id>). Admin dikecualikan dari DM semua user
+    karena sudah dapat DM admin di atas (hindari dobel, perintah user
+    17 Nov 2026)."""
     cat_name = await get_category_name(session, product.category_id)
     text = build_stock_out_text(product, cat_name)
     kb = remind_kb(product.id)
     ok = await send_to_aeternum(bot, text, reply_markup=kb)
     await send_to_group(bot, text, reply_markup=kb)
     await send_to_admin_dm(bot, text, reply_markup=kb)
+    dm_sent, dm_failed = await broadcast_to_all_users(
+        bot, session, text, reply_markup=kb, exclude_ids={settings.ADMIN_ID}
+    )
+    logger.info(
+        "Broadcast stok habis %s (id=%s): channel=%s, DM semua=%s (gagal %s).",
+        product.name, product.id, ok, dm_sent, dm_failed,
+    )
     return ok
 
 
@@ -827,18 +870,37 @@ async def broadcast_product_added(
 
 
 async def broadcast_user_joined(bot: Bot, chat_id: int, first_name: str) -> bool:
-    """User baru gabung CHANNEL AETERNUM -> kabar singkat di channel itu."""
+    """User baru gabung CHANNEL AETERNUM -> kabar singkat di channel itu.
+
+    Rolling (sama seperti sambutan grup): hanya sambutan terbaru yang
+    bertahan. Id sambutan lama (tersimpan di last_group_welcome.json,
+    kunci = chat_id) dihapus setelah sambutan baru terkirim, lalu id
+    baru disimpan. Kirim dulu baru hapus, supaya sambutan tidak hilang
+    bila kirim gagal.
+    """
     text = (
         f"👋 Selamat datang <b>{html.escape(first_name)}</b> di channel Aeternum!\n\n"
         f"Info produk digital, stok ready, dan promo ada di sini. "
         f"Katalog produk: @aeternum_premibot"
     )
-    try:
-        await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+    async with _WELCOME_LOCK:
+        prev_ids = _read_last_welcome_ids()
+        prev_id = prev_ids.get(str(chat_id))
+        try:
+            sent = await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        except Exception as e:
+            logger.warning(f"Gagal kirim sambutan gabung ke {chat_id}: {e}")
+            return False
+        if prev_id:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=int(prev_id))
+            except Exception as e:
+                logger.warning(
+                    f"Gagal hapus sambutan lama {prev_id} di {chat_id}: {e}"
+                )
+        prev_ids[str(chat_id)] = sent.message_id
+        _write_last_welcome_ids(prev_ids)
         return True
-    except Exception as e:
-        logger.warning(f"Gagal kirim sambutan gabung ke {chat_id}: {e}")
-        return False
 
 
 def build_group_welcome_text(user_id: int, first_name: str, username: Optional[str]) -> str:

@@ -50,7 +50,7 @@ from bot.services.broadcast import (
     broadcast_price_changed,
     broadcast_product_added,
     broadcast_ready_digest_to_aeternum,
-    broadcast_ready_digest_to_channel,
+    broadcast_ready_digest_to_group,
     broadcast_stock_added,
     broadcast_stock_out,
     broadcast_to_all_users,
@@ -336,19 +336,19 @@ async def send_daily_ready_digest(bot: Bot, session) -> Tuple[int, int]:
         logger.info("Daily ready digest dilewati: tidak ada produk ready.")
         return 0, 0
     chunks = build_ready_digest_chunks(ready)
-    # Album slide katalog Aeternum (disinkron watcher tiap rebuild) di
-    # depan daftar teks, di semua tujuan digest. Album pertama di-upload
-    # ke channel Peka; file_id-nya dipakai ulang untuk channel Aeternum
-    # + DM supaya tidak upload ulang 6 gambar per penerima. Slide gagal
+    # Sampul katalog Aeternum (slide-1, disinkron watcher tiap rebuild) di
+    # depan daftar teks, di semua tujuan digest. Sampul pertama di-upload
+    # ke channel Aeternum; file_id-nya dipakai ulang untuk grup Peka
+    # + DM supaya tidak upload ulang per penerima. Slide gagal
     # tidak menggagalkan digest teks.
-    slide_file_ids = await send_digest_slides(bot, settings.PEKA_CHANNEL_ID)
+    slide_file_ids = await send_digest_slides(bot, settings.AETERNUM_CHANNEL_ID)
     await send_digest_slides(
-        bot, settings.AETERNUM_CHANNEL_ID, slide_file_ids
+        bot, settings.PEKA_GROUP_ID, slide_file_ids
     )
-    # Broadcast rutin: ringkasan dikirim ke channel Peka (komunitas Peka
-    # hanya dapat info stok ready) DAN ke channel Aeternum (premich dapat
-    # semua broadcast). Grup Peka ikut dapat via discussion yang terhubung.
-    await broadcast_ready_digest_to_channel(bot, chunks)
+    # Broadcast rutin (perintah user 19 Nov 2026): ringkasan dikirim ke
+    # grup Peka DAN ke channel Aeternum (premich dapat semua broadcast).
+    # Channel Peka TIDAK lagi dapat digest.
+    await broadcast_ready_digest_to_group(bot, chunks)
     await broadcast_ready_digest_to_aeternum(bot, chunks)
     user_ids = await crud.get_all_user_ids(session=session)
     sent = 0

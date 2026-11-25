@@ -829,5 +829,5 @@ async def handle_gopay_mutation_webhook(
 async def api_get_dynamic_qris(amount: int = Query(..., gt=0)):
     """Menghasilkan string dynamic QRIS dan PNG preview."""
     dynamic_payload = make_dynamic_qris(amount=amount)
-    qr_buf = generate_qr_image_bytes(dynamic_payload)
+    qr_buf = generate_qr_image_bytes(dynamic_payload, amount=amount)
     return Response(content=qr_buf.getvalue(), media_type="image/png")
