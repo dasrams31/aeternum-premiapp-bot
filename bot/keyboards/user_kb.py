@@ -47,7 +47,7 @@ def get_miniapp_url() -> Optional[str]:
     base_url = (settings.WEBHOOK_HOST or "").strip()
     if base_url.startswith("https://"):
         return f"{base_url.rstrip('/')}/app"
-    return "https://shop.dasrams.biz.id"
+    return "https://store.peka.ai.id"
 
 
 def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
@@ -57,7 +57,7 @@ def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(
             text="🚀 Buka Web Store Aeternum",
-            url="https://shop.dasrams.biz.id"
+            url="https://store.peka.ai.id"
         )
     )
     
@@ -125,7 +125,7 @@ def webstore_kb() -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(
             text="🚀 Buka Web Store Aeternum",
-            url="https://shop.dasrams.biz.id",
+            url="https://store.peka.ai.id",
         )
     )
     return builder.as_markup()
